@@ -19,12 +19,15 @@ Examples:
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING
 
 from bus.envelope import Envelope
 
 if TYPE_CHECKING:
     from bus.imap_server import IMAPServer
+
+log = logging.getLogger(__name__)
 
 _SCHEME = "comms://"
 
@@ -39,10 +42,20 @@ class Router:
 
     send() = resolve() + imap_server.append(). The split exists so callers
     can validate addresses before composing messages.
+
+    Self-healing: if the IMAP server raises ConnectionError on send(), Router
+    delegates to BusLauncher.relaunch() and retries once. If relaunch fails or
+    the bus is blocked, BusBlockedError / BusUnavailableError propagate to caller.
+    Pass bus_launcher=None (default) to disable self-healing (e.g. in tests).
     """
 
-    def __init__(self, imap_server: "IMAPServer") -> None:
+    def __init__(
+        self,
+        imap_server: "IMAPServer",
+        bus_launcher: "BusLauncher | None" = None,
+    ) -> None:
         self._imap = imap_server
+        self._launcher = bus_launcher
 
     def resolve(self, address: str) -> str:
         """
@@ -71,8 +84,31 @@ class Router:
         """
         Dispatch an envelope to the mailbox identified by the comms:// address.
 
-        Resolves the address first — raises AddressError immediately if unknown,
-        rather than silently dropping the message.
+        Resolves the address first — raises AddressError immediately if unknown.
+        On ConnectionError, delegates to BusLauncher for self-healing if configured.
         """
-        mailbox = self.resolve(address)
-        self._imap.append(mailbox, envelope)
+        from agent_datacenter.bus.bus_launcher import BusBlockedError, BusLauncher
+
+        if self._launcher is not None and self._launcher.is_blocked():
+            raise BusBlockedError(
+                "Bus is blocked — operator must manually clear block before sending."
+            )
+
+        try:
+            mailbox = self.resolve(address)
+            self._imap.append(mailbox, envelope)
+        except (ConnectionError, OSError) as exc:
+            if self._launcher is None:
+                raise
+            log.warning("Bus unreachable on send to %r: %s", address, exc)
+            relaunched = self._launcher.relaunch()
+            if not relaunched:
+                from agent_datacenter.bus.bus_launcher import BusUnavailableError
+
+                raise BusUnavailableError(
+                    f"Bus relaunch failed — cannot deliver to {address!r}"
+                ) from exc
+            # Retry once after successful relaunch
+            mailbox = self.resolve(address)
+            self._imap.append(mailbox, envelope)
+            log.info("Retry after relaunch succeeded for %r", address)

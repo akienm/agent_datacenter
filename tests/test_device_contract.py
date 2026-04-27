@@ -11,6 +11,8 @@ import pytest
 
 from agent_datacenter.device import BaseDevice, INTERFACE_VERSION
 from agent_datacenter.shim import BaseShim
+from devices.browser_use.device import BrowserUseDevice
+from devices.browser_use.shim import BrowserUseShim
 from devices.postgres.device import PostgresDevice
 from devices.template.device import TemplateDevice
 from devices.template.shim import TemplateShim
@@ -21,11 +23,13 @@ ALL_DEVICE_CLASSES = [
     PostgresDevice,
     TemplateDevice,
     StubDevice,
+    BrowserUseDevice,
 ]
 
 ALL_SHIM_CLASSES = [
     TemplateShim,
     StubShim,
+    BrowserUseShim,
 ]
 
 
