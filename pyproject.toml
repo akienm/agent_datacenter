@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agent_datacenter"
+version = "0.1.0"
+description = "Runtime substrate for agent deployments — skeleton, IMAP bus, device/shim contracts"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["agent_datacenter*", "bus*", "skeleton*", "devices*", "config*"]
+
+[project.scripts]
+agentctl = "agent_datacenter.rack:main"

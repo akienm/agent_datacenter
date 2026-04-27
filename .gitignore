@@ -1,0 +1,19 @@
+# Runtime
+*.db
+.env
+datacenter_logs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Dev
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
