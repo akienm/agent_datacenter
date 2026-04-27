@@ -32,7 +32,7 @@ _SETTINGS_PATH = os.path.expanduser("~/.claude/settings.json")
 _HOOK_ID = "ygm-nudge"
 
 # The hook command — uses the repo root PYTHONPATH so devices.claude resolves
-_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 _HOOK_COMMAND = (
     f"cd {_REPO_ROOT} && python3 -m devices.claude.ygm_check 2>/dev/null || true"
 )
