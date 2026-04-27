@@ -13,6 +13,7 @@ import time
 from typing import TYPE_CHECKING
 
 from agent_datacenter.device import BaseDevice, INTERFACE_VERSION
+from agent_datacenter.skeleton.exceptions import DeviceBlockedError
 
 if TYPE_CHECKING:
     from devices.postgres.shim import PostgresShim
@@ -53,9 +54,28 @@ def _pg_connect():
 
 
 class PostgresDevice(BaseDevice):
-    def __init__(self, shim: PostgresShim | None = None) -> None:
+    def __init__(self, shim: PostgresShim | None = None, registry=None) -> None:
         self._shim = shim
+        self._registry = (
+            registry  # DeviceRegistry; when set, ops check block status first
+        )
         self._startup_errors: list[str] = []
+
+    def _check_not_blocked(self) -> None:
+        """Raise DeviceBlockedError immediately if this device is blocked in the registry.
+
+        Prevents dependent devices from hanging on TCP timeout during a Postgres block
+        (e.g. during a migration where Postgres is intentionally taken offline).
+        """
+        if self._registry is None:
+            return
+        record = self._registry.get_device("postgres")
+        if record and record.get("status") == "blocked":
+            raise DeviceBlockedError(
+                device_id="postgres",
+                block_type=record.get("block_type", "manual"),
+                blocked_since=record.get("blocked_since"),
+            )
 
     def who_am_i(self) -> dict:
         return {
@@ -96,6 +116,7 @@ class PostgresDevice(BaseDevice):
         return INTERFACE_VERSION
 
     def health(self) -> dict:
+        self._check_not_blocked()
         conn = _pg_connect()
         if conn is None:
             return {
