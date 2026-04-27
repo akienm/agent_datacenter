@@ -13,6 +13,12 @@ from agent_datacenter.device import BaseDevice, INTERFACE_VERSION
 from agent_datacenter.shim import BaseShim
 from devices.browser_use.device import BrowserUseDevice
 from devices.browser_use.shim import BrowserUseShim
+from devices.claude.device import ClaudeDevice
+from devices.claude.shim import ClaudeShim
+from devices.igor.device import IgorDevice
+from devices.igor.shim import IgorShim
+from devices.inference.device import InferenceDevice
+from devices.inference.shim import InferenceShim
 from devices.postgres.device import PostgresDevice
 from devices.template.device import TemplateDevice
 from devices.template.shim import TemplateShim
@@ -24,12 +30,18 @@ ALL_DEVICE_CLASSES = [
     TemplateDevice,
     StubDevice,
     BrowserUseDevice,
+    IgorDevice,
+    InferenceDevice,
+    ClaudeDevice,
 ]
 
 ALL_SHIM_CLASSES = [
     TemplateShim,
     StubShim,
     BrowserUseShim,
+    IgorShim,
+    InferenceShim,
+    ClaudeShim,
 ]
 
 
