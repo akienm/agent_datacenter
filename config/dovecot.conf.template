@@ -1,0 +1,65 @@
+# Dovecot configuration template for agent_datacenter rack.
+#
+# Copy to /etc/dovecot/dovecot.conf (or include from there) and fill in
+# the <PLACEHOLDER> values for your deployment.
+#
+# Retention policy: all mailboxes use a 24-hour SEEN expiry via the expire plugin.
+# UNSEEN messages are retained until 24hr after sent_at (their IMAP internal date).
+# Reading a message does NOT trigger early deletion — expiry is time-based only.
+#
+# See: https://doc.dovecot.org/settings/plugin/expire/
+
+protocols = imap
+
+# Mail storage. Adjust to your host layout.
+mail_location = maildir:<MAIL_HOME_DIR>/%u/Maildir
+
+# Listen on localhost only — the rack is a single-machine deployment in v1.
+listen = 127.0.0.1
+
+# TLS — disabled in v1 (localhost-only). Enable when multi-host is supported.
+ssl = no
+
+# Auth — plain text on localhost is acceptable in v1 (no network exposure).
+auth_mechanisms = plain login
+
+passdb {
+  driver = passwd-file
+  args = <PASSWD_FILE>
+}
+
+userdb {
+  driver = passwd-file
+  args = <PASSWD_FILE>
+}
+
+# ── 24-hour retention via expire plugin ───────────────────────────────────────
+#
+# expire: marks SEEN messages for deletion after N days.
+# expire2: actually expunges them on the next dovecot housekeeping pass.
+# expunge_interval controls how often Dovecot runs the expunge sweep.
+#
+# RETENTION_HOURS = 24 → expire = 1d
+
+mail_plugins = $mail_plugins expire
+
+plugin {
+  # Expire SEEN messages after 1 day in all device mailboxes (pattern: *)
+  expire = 1d
+
+  # Expire the Shared mailbox at the same rate
+  expire Shared = 1d
+
+  # Expunge sweep runs hourly — keeps latency under 2hr in the worst case.
+  # Increase to reduce Dovecot CPU usage on large deployments.
+  expunge_interval = 1 hour
+}
+
+# ── IDLE support (for real-time message notification) ─────────────────────────
+#
+# IDLE is used by IMAPServer.fetch_unseen() to wake immediately on new mail.
+# No extra config needed; Dovecot IMAP supports IDLE by default.
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+log_path = /var/log/dovecot/dovecot.log
+info_log_path = /var/log/dovecot/dovecot-info.log

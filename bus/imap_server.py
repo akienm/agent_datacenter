@@ -28,6 +28,7 @@ import re
 import threading
 import time
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 
 from bus.envelope import Envelope
 
@@ -352,3 +353,60 @@ class IMAPServer:
         assert self._client
         raw_msgs = self._client.fetch_unseen(mailbox)
         return [Envelope.from_json(r.decode()) for r in raw_msgs]
+
+    def purge_old_messages(self, retention_hours: int = 24) -> int:
+        """
+        Remove messages older than retention_hours from all mailboxes (test mode only).
+
+        Expiry is based on Envelope.sent_at. Both SEEN and UNSEEN messages are retained
+        until the cutoff — reading a message does NOT trigger early deletion.
+        Returns total number of messages purged across all mailboxes.
+
+        In production, Dovecot handles expiry via the expire plugin (see
+        config/dovecot.conf.template). This method is a no-op outside test mode.
+        """
+        if not _TEST_MODE:
+            return 0
+
+        import json as _json
+
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=retention_hours)
+        total_purged = 0
+
+        for mbox in list(_STUB_MAILBOXES.keys()):
+            msgs = _STUB_MAILBOXES[mbox]
+            seen = _STUB_SEEN[mbox]
+
+            kept_msgs: list[bytes] = []
+            kept_old_indices: set[int] = set()  # old indices that are being kept
+            for old_idx, raw in enumerate(msgs):
+                try:
+                    data = _json.loads(raw.decode())
+                    sent_at = datetime.fromisoformat(data.get("sent_at", ""))
+                    if sent_at.tzinfo is None:
+                        sent_at = sent_at.replace(tzinfo=timezone.utc)
+                    expired = sent_at < cutoff
+                except Exception:
+                    expired = False  # malformed envelope — keep it
+
+                if not expired:
+                    kept_old_indices.add(old_idx)
+                    kept_msgs.append(raw)
+
+            purged = len(msgs) - len(kept_msgs)
+            if purged:
+                # Rebuild seen set with updated indices
+                new_seen: set[int] = set()
+                new_idx = 0
+                for old_idx in range(len(msgs)):
+                    if old_idx in kept_old_indices:
+                        if old_idx in seen:
+                            new_seen.add(new_idx)
+                        new_idx += 1
+
+                _STUB_MAILBOXES[mbox] = kept_msgs
+                _STUB_SEEN[mbox] = new_seen
+                total_purged += purged
+                log.info("purged %d expired message(s) from mailbox %r", purged, mbox)
+
+        return total_purged

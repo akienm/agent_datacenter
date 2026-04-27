@@ -29,3 +29,8 @@ class DeviceConfig:
 
     def to_dict(self) -> dict:
         return _asdict(self)
+
+
+# Rack-level retention policy. All mailboxes retain messages for this many hours
+# regardless of SEEN status. After expiry, messages are expunged permanently.
+RETENTION_HOURS: int = 24

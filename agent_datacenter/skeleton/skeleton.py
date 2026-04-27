@@ -6,8 +6,10 @@ The skeleton is device #1 on every rack. It:
   - Maintains the flat-file device registry (no Postgres dependency)
   - Detects namespace collisions at registration time (fails hard before start)
   - Proxies {device_id}.health to each registered device object
+  - Creates IMAP mailboxes on device registration (mailboxes persist after deregistration)
+  - Enforces v1 access control: halt/block require 'skeleton' or self as caller
 
-v1 proxy scope: rack.* tools + per-device .health tool.
+v1 proxy scope: rack.* tools + per-device .health/.halt/.block tools.
 Full tool-namespace proxying (transparent MCP-over-MCP) is a future ticket.
 """
 
@@ -17,13 +19,22 @@ import logging
 import os
 import time
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from mcp.server.fastmcp import FastMCP
 
 from agent_datacenter.device import BaseDevice, INTERFACE_VERSION
-from agent_datacenter.skeleton.exceptions import RegistrationError
+from agent_datacenter.skeleton.exceptions import AuthError, RegistrationError
+from agent_datacenter.skeleton.health import (
+    rack_channels,
+    rack_devices,
+    rack_health_async,
+)
 from config.device_config import DeviceConfig
 from skeleton.registry import DeviceRegistry
+
+if TYPE_CHECKING:
+    from bus.imap_server import IMAPServer
 
 log = logging.getLogger(__name__)
 
@@ -33,8 +44,13 @@ _START_TIME = time.time()
 class Skeleton(BaseDevice):
     DEVICE_ID = "skeleton"
 
-    def __init__(self, registry: DeviceRegistry | None = None) -> None:
+    def __init__(
+        self,
+        registry: DeviceRegistry | None = None,
+        imap_server: "IMAPServer | None" = None,
+    ) -> None:
         self._registry = registry or DeviceRegistry()
+        self._imap_server = imap_server
         self._devices: dict[str, BaseDevice] = {}  # live device objects
         self._mcp = FastMCP("agent_datacenter")
         self._setup_rack_tools()
@@ -53,32 +69,21 @@ class Skeleton(BaseDevice):
         skel = self
 
         @self._mcp.tool()
-        def rack_devices() -> list[dict]:
+        def rack_devices_tool() -> list[dict]:
             """List all registered devices and their current status."""
-            return skel._registry.list_devices()
+            return rack_devices(skel._registry)
 
         @self._mcp.tool()
-        def rack_health() -> dict:
-            """Return a health rollup across all registered devices."""
-            return skel._health_rollup()
+        async def rack_health_tool() -> dict:
+            """Return a parallel health rollup across all registered devices."""
+            return await rack_health_async(skel._devices)
 
         @self._mcp.tool()
-        def rack_channels() -> list[str]:
-            """List all comms:// mailbox addresses registered on this rack."""
-            return [d.get("mailbox", "") for d in skel._registry.list_devices()]
-
-    def _health_rollup(self) -> dict:
-        rollup = {}
-        for device_id, device in self._devices.items():
-            try:
-                rollup[device_id] = device.health()
-            except Exception as e:
-                rollup[device_id] = {
-                    "status": "unhealthy",
-                    "detail": str(e),
-                    "checked_at": _now(),
-                }
-        return rollup
+        def rack_channels_tool() -> list[str]:
+            """List all IMAP mailbox names registered on this rack."""
+            if skel._imap_server is None:
+                return []
+            return rack_channels(skel._imap_server)
 
     # ── Device registration ───────────────────────────────────────────────────
 
@@ -90,10 +95,18 @@ class Skeleton(BaseDevice):
     ) -> None:
         device_id = device.who_am_i()["device_id"]
 
+        # Hard-fail on live collision; allow reattach when device is offline.
+        # Offline reattach: device crashed or was deregistered but registry record persists.
         if device_id in self._devices:
             raise RegistrationError(
-                f"Device '{device_id}' is already registered. "
-                "Deregister before re-registering."
+                f"Device '{device_id}' is already registered and online."
+            )
+        existing = self._registry.get_device(device_id)
+        if existing and existing.get("status") != "offline":
+            raise RegistrationError(
+                f"Device '{device_id}' is already registered "
+                f"(status='{existing['status']}'). "
+                "Deregister or wait for offline status before re-registering."
             )
 
         cfg = config or DeviceConfig()
@@ -104,21 +117,37 @@ class Skeleton(BaseDevice):
         )
         self._devices[device_id] = device
 
-        # Expose {device_id}.health as an MCP tool
+        # Create the device's IMAP mailbox. If it already exists (reattach after
+        # offline), this is a no-op — IMAPServer.create_mailbox is idempotent.
+        # Mailboxes are NOT deleted on deregistration; see deregister_device().
+        if self._imap_server is not None:
+            try:
+                self._imap_server.create_mailbox(device_id)
+            except Exception:
+                log.warning(
+                    "could not create mailbox for %s — messages will queue until available",
+                    device_id,
+                )
+
+        # Expose {device_id}.health, .halt, .block as MCP tools
         self._add_device_health_tool(device_id, device)
+        self._add_device_control_tools(device_id, device)
         log.info("registered device %s (mailbox=%s)", device_id, mbox)
 
     def deregister_device(self, device_id: str) -> None:
         self._devices.pop(device_id, None)
-        self._registry.deregister(device_id)
+        self._registry.set_status(device_id, "offline")
+        # Do NOT delete the IMAP mailbox. Messages are retained for 24hr (T-adc-imap-24hr-retention).
+        # Manual cleanup is handled by agentctl cleanup-mailboxes (future).
         # Note: MCP tools registered via FastMCP are not dynamically removable in v1.
         # The tool remains but returns an error after deregistration.
-        log.info("deregistered device %s", device_id)
+        log.info(
+            "deregistered device %s (mailbox retained for 24hr retention)", device_id
+        )
 
     def _add_device_health_tool(self, device_id: str, device: BaseDevice) -> None:
         skel = self
 
-        # Use a closure to capture device_id/device correctly
         def make_health_tool(did: str, dev: BaseDevice):
             tool_name = f"{did}_health"
 
@@ -141,6 +170,56 @@ class Skeleton(BaseDevice):
                     }
 
         make_health_tool(device_id, device)
+
+    def _add_device_control_tools(self, device_id: str, device: BaseDevice) -> None:
+        """
+        Register {device_id}_halt and {device_id}_block MCP tools.
+
+        v1 access control: halt and block require from_device == 'skeleton' or == device_id.
+        Trust model is envelope-level (localhost trust); cryptographic ACL is Phase 5+.
+        """
+        skel = self
+
+        def make_control_tools(did: str, dev: BaseDevice) -> None:
+            @skel._mcp.tool(name=f"{did}_halt")
+            def device_halt(from_device: str) -> dict:
+                f"""Halt device '{did}'. Requires from_device == 'skeleton' or == '{did}'."""
+                skel._check_caller_auth(from_device, did, "halt")
+                if did not in skel._devices:
+                    return {"error": f"device '{did}' not online"}
+                dev.halt()
+                return {"ok": True, "device_id": did, "op": "halt"}
+
+            @skel._mcp.tool(name=f"{did}_block")
+            def device_block(from_device: str, reason: str = "") -> dict:
+                f"""Block device '{did}'. Requires from_device == 'skeleton' or == '{did}'."""
+                skel._check_caller_auth(from_device, did, "block")
+                if did not in skel._devices:
+                    return {"error": f"device '{did}' not online"}
+                dev.block(reason)
+                skel._registry.set_status(did, "blocked")
+                return {"ok": True, "device_id": did, "op": "block", "reason": reason}
+
+        make_control_tools(device_id, device)
+
+    def _check_caller_auth(
+        self, from_device: str, target_device_id: str, op: str
+    ) -> None:
+        """Raise AuthError if from_device is not authorized to call op on target."""
+        if from_device not in (self.DEVICE_ID, target_device_id):
+            log.warning(
+                "auth denied: from_device=%r attempted %s on %r",
+                from_device,
+                op,
+                target_device_id,
+            )
+            raise AuthError(
+                f"Unauthorized: {op} on '{target_device_id}' requires "
+                f"from_device == 'skeleton' or == '{target_device_id}', "
+                f"got '{from_device}'",
+                from_device=from_device,
+                target=target_device_id,
+            )
 
     # ── BaseDevice contract ───────────────────────────────────────────────────
 

@@ -34,3 +34,18 @@ class DeviceBlockedError(Exception):
 
 class RegistrationError(Exception):
     """Raised when a device attempts to register under an already-taken namespace."""
+
+
+class AuthError(Exception):
+    """
+    Raised when a caller lacks permission for a privileged operation.
+
+    halt() and block() require from_device == 'skeleton' or == target device_id.
+    v1 trust model: caller identity taken from envelope.from_device (localhost trust).
+    Cryptographic ACL is Phase 5+.
+    """
+
+    def __init__(self, message: str, from_device: str = "", target: str = "") -> None:
+        self.from_device = from_device
+        self.target = target
+        super().__init__(message)
