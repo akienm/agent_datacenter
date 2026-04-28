@@ -15,11 +15,15 @@ from devices.browser_use.device import BrowserUseDevice
 from devices.browser_use.shim import BrowserUseShim
 from devices.claude.device import ClaudeDevice
 from devices.claude.shim import ClaudeShim
+from devices.discord_bot.device import DiscordBotDevice
+from devices.discord_bot.shim import DiscordBotShim
 from devices.igor.device import IgorDevice
 from devices.igor.shim import IgorShim
 from devices.inference.device import InferenceDevice
 from devices.inference.shim import InferenceShim
 from devices.postgres.device import PostgresDevice
+from devices.swadl.device import SwadlDevice
+from devices.swadl.shim import SwadlShim
 from devices.template.device import TemplateDevice
 from devices.template.shim import TemplateShim
 from tests.fixtures.stub_devices import StubDevice, StubShim
@@ -33,6 +37,8 @@ ALL_DEVICE_CLASSES = [
     IgorDevice,
     InferenceDevice,
     ClaudeDevice,
+    DiscordBotDevice,
+    SwadlDevice,
 ]
 
 ALL_SHIM_CLASSES = [
@@ -42,6 +48,8 @@ ALL_SHIM_CLASSES = [
     IgorShim,
     InferenceShim,
     ClaudeShim,
+    DiscordBotShim,
+    SwadlShim,
 ]
 
 
