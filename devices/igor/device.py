@@ -26,7 +26,7 @@ _START_TIME = time.time()
 _DEFAULT_SESSION = os.environ.get("IGOR_TMUX_SESSION", "igor")
 _DEFAULT_HOME = os.environ.get(
     "IGOR_HOME",
-    os.path.expanduser("~/.TheIgors/Igor-wild-0001"),
+    os.path.expanduser("~/.agent_datacenter/Igor-wild-0001"),
 )
 
 

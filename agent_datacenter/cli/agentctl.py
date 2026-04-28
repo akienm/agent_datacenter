@@ -2,16 +2,19 @@
 agentctl — command-line interface for agent_datacenter rack management.
 
 Usage:
-    agentctl init      Bootstrap an empty rack on a clean machine.
-    agentctl status    Print rack health from the running skeleton.
+    agentctl init [--instance <name>]   Bootstrap an empty rack on a clean machine.
+    agentctl status                     Print rack health from the running skeleton.
 
 The init command is idempotent: re-running on an existing install is safe.
+
+Runtime root is $AGENT_DATACENTER_HOME (default ~/.agent_datacenter/).
+Log tree is $AGENT_DATACENTER_HOME/logs/<system|comms-channel>/.
+Instance data is $AGENT_DATACENTER_HOME/<instance-name>/.
 """
 
 from __future__ import annotations
 
 import logging
-import os
 import shutil
 import subprocess
 import sys
@@ -19,24 +22,42 @@ from pathlib import Path
 
 import click
 
+from config.device_config import agent_datacenter_home, agent_datacenter_logs
+
 log = logging.getLogger(__name__)
 
-_RUNTIME_DIR = Path.home() / ".agent_datacenter"
-_LOG_SUBDIRS = ["skeleton", "postgres", "imap"]
+# Comms channels that get log directories on init
+_COMMS_LOG_DIRS = ["CC.0", "Shared"]
+# System-level log dirs (rack + known devices)
+_SYSTEM_LOG_DIRS = ["rack", "claude_code"]
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
-def _ensure_runtime_dirs() -> None:
-    _RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
-    logs = _RUNTIME_DIR / "datacenter_logs"
-    for sub in _LOG_SUBDIRS:
-        (logs / sub).mkdir(parents=True, exist_ok=True)
+def _ensure_runtime_dirs(instance: str | None = None) -> Path:
+    """Create the full ~/.agent_datacenter/ tree. Returns the home path."""
+    home = agent_datacenter_home()
+    home.mkdir(parents=True, exist_ok=True)
+
+    logs = agent_datacenter_logs()
+    logs.mkdir(parents=True, exist_ok=True)
+
+    for sub in _SYSTEM_LOG_DIRS:
+        (logs / sub).mkdir(exist_ok=True)
+    for ch in _COMMS_LOG_DIRS:
+        (logs / ch).mkdir(exist_ok=True)
+
+    if instance:
+        instance_dir = home / instance
+        instance_dir.mkdir(exist_ok=True)
+        (logs / instance).mkdir(exist_ok=True)
+
+    return home
 
 
 def _write_default_config() -> None:
-    cfg = _RUNTIME_DIR / "device_config.toml"
+    cfg = agent_datacenter_home() / "device_config.toml"
     if cfg.exists():
         return
     cfg.write_text(
@@ -83,26 +104,37 @@ def cli(debug: bool) -> None:
 
 
 @cli.command()
-def init() -> None:
+@click.option(
+    "--instance",
+    default=None,
+    help="Instance name to create (e.g. Igor-wild-0001). Creates instance dir and logs subdir.",
+)
+def init(instance: str | None) -> None:
     """
     Bootstrap an empty rack on a clean machine.
 
-    Creates the ~/.agent_datacenter/ runtime directory, initialises logging
-    directories, writes default config, and starts the skeleton. Idempotent:
-    safe to re-run on an existing install.
+    Creates the $AGENT_DATACENTER_HOME/ runtime directory, the hierarchical
+    logs/ tree (logs/<system|comms-channel>/), optional instance directory,
+    writes default config, and starts the skeleton. Idempotent: safe to
+    re-run on an existing install.
+
+    Set AGENT_DATACENTER_HOME to override the default ~/.agent_datacenter/.
     """
-    click.echo("agent_datacenter init")
+    home = agent_datacenter_home()
+    click.echo(f"agent_datacenter init  (home: {home})")
 
     # 1. Runtime dirs
-    _ensure_runtime_dirs()
-    click.echo(f"  runtime dir:  {_RUNTIME_DIR}")
-    click.echo(
-        f"  logs:         {_RUNTIME_DIR / 'datacenter_logs'}/{{skeleton,postgres,imap}}/"
-    )
+    _ensure_runtime_dirs(instance=instance)
+    logs = agent_datacenter_logs()
+    click.echo(f"  runtime dir:  {home}")
+    click.echo(f"  logs root:    {logs}/")
+    if instance:
+        click.echo(f"  instance:     {home / instance}/")
+        click.echo(f"  instance log: {logs / instance}/")
 
     # 2. Default config
     _write_default_config()
-    click.echo(f"  config:       {_RUNTIME_DIR / 'device_config.toml'}")
+    click.echo(f"  config:       {home / 'device_config.toml'}")
 
     # 3. Postgres check
     pg_mode = _detect_postgres()

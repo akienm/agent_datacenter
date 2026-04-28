@@ -1,26 +1,34 @@
 """
 LoggingControlCenter — hierarchical log routing for agent_datacenter devices.
 
-Log tree layout:
-  datacenter_logs/
-    igor/
+Log tree layout (rooted at $AGENT_DATACENTER_HOME/logs/):
+  logs/
+    rack/                  # skeleton, bus, registry
+      rack.log
+    Igor-wild-0001/        # Igor subsystem logs
       cognition/
-        igor.log
+        Igor-wild-0001.log
       memory/
-        igor.log
-    postgres/
-      postgres.log
-    template/
-      template.log
+        Igor-wild-0001.log
+    claude_code/           # CC logs
+      claude_code.log
+    CC.0/                  # comms-channel logs (chat history written by export_chat)
+    Shared/                # comms-channel logs
 
-Each device gets its own directory; subsystems get a subdirectory within
-the device directory. All log files use RotatingFileHandler (10MB, 5 backups).
+Each component gets a directory named after its system or comms-channel address.
+Subsystems nest one level deeper. All log files use RotatingFileHandler (10MB,
+5 backups).
+
+Default root is $AGENT_DATACENTER_HOME/logs/ (see config.device_config).
+Override by calling configure(custom_root) before first use.
 
 Usage:
     from agent_datacenter.logcontrol.control_center import LoggingControlCenter
-    LoggingControlCenter.configure(Path('datacenter_logs'))
-    log = LoggingControlCenter.instance().get_logger('igor', 'cognition')
+    # Uses $AGENT_DATACENTER_HOME/logs/ automatically:
+    log = LoggingControlCenter.instance().get_logger('Igor-wild-0001', 'cognition')
     log.info('cognition cycle complete')
+    # Or with explicit root:
+    LoggingControlCenter.configure(Path('/tmp/test-logs'))
 """
 
 from __future__ import annotations
@@ -38,6 +46,13 @@ class LoggingControlCenter:
         self._root = root
 
     @classmethod
+    def default_root(cls) -> Path:
+        """Return the default log root from $AGENT_DATACENTER_HOME/logs/."""
+        from config.device_config import agent_datacenter_logs
+
+        return agent_datacenter_logs()
+
+    @classmethod
     def configure(cls, root: Path) -> LoggingControlCenter:
         """Set the log root and return the singleton instance."""
         cls._instance = cls(root)
@@ -46,10 +61,7 @@ class LoggingControlCenter:
     @classmethod
     def instance(cls) -> LoggingControlCenter:
         if cls._instance is None:
-            raise RuntimeError(
-                "LoggingControlCenter not configured. "
-                "Call LoggingControlCenter.configure(path) first."
-            )
+            cls._instance = cls(cls.default_root())
         return cls._instance
 
     def get_logger(
