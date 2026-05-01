@@ -37,7 +37,7 @@ class StubDevice(BaseDevice):
 
     def comms(self) -> dict:
         return {
-            "address": "comms://stub/inbox",
+            "address": "comms://stub",
             "mode": "read_write",
             "supports_push": False,
             "supports_pull": False,

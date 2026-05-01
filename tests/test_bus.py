@@ -102,6 +102,55 @@ def test_router_bad_scheme_raises(server):
         router.resolve("smtp://CC.0")
 
 
+# ── Suffix-style addressing (§ 14 decision 11.A) ──────────────────────────────
+
+
+def test_router_resolve_peels_surface_suffix(server):
+    """comms://mbox.surface peels to mbox when 'mbox' is a registered mailbox."""
+    server.create_mailbox("igor-wild-0001")
+    router = Router(server)
+    assert router.resolve("comms://igor-wild-0001.console") == "igor-wild-0001"
+
+
+def test_router_resolve_peels_multi_segment_surface(server):
+    """comms://mbox.console.session-2 peels back to mbox."""
+    server.create_mailbox("akiendelllinux.1")
+    router = Router(server)
+    assert (
+        router.resolve("comms://akiendelllinux.1.console.session-2")
+        == "akiendelllinux.1"
+    )
+
+
+def test_router_extract_surface_returns_qualifier(server):
+    """extract_surface returns the dot-joined suffix after the matched mailbox."""
+    server.create_mailbox("igor-wild-0001")
+    router = Router(server)
+    assert router.extract_surface("comms://igor-wild-0001.console") == "console"
+    assert (
+        router.extract_surface("comms://igor-wild-0001.console.tab-3")
+        == "console.tab-3"
+    )
+    assert router.extract_surface("comms://igor-wild-0001") is None
+
+
+def test_router_resolve_prefers_full_match_over_peel(server):
+    """When the full path is itself a mailbox, the peel pass is not run."""
+    server.create_mailbox("CC.0")
+    server.create_mailbox("CC")
+    router = Router(server)
+    # CC.0 is itself a registered mailbox — must resolve to CC.0, not to CC.
+    assert router.resolve("comms://CC.0") == "CC.0"
+    assert router.extract_surface("comms://CC.0") is None
+
+
+def test_router_resolve_suffix_no_prefix_match_raises(server):
+    """No prefix registered → AddressError (no false-positive match on '')."""
+    router = Router(server)
+    with pytest.raises(AddressError, match="no prefix registered"):
+        router.resolve("comms://nonexistent.foo.bar")
+
+
 # ── Fetch + seen semantics ────────────────────────────────────────────────────
 
 

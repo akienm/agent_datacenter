@@ -58,7 +58,7 @@ class Skeleton(BaseDevice):
         self._registry.register(
             self.DEVICE_ID,
             DeviceConfig(manual_block_only=True),
-            "comms://skeleton/inbox",
+            "comms://skeleton",
             name="Skeleton",
         )
         log.info("skeleton initialized — rack.* tools registered")
@@ -244,7 +244,7 @@ class Skeleton(BaseDevice):
 
     def comms(self) -> dict:
         return {
-            "address": "comms://skeleton/inbox",
+            "address": "comms://skeleton",
             "mode": "read_write",
             "supports_push": False,
             "supports_pull": True,
