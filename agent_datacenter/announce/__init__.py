@@ -14,6 +14,7 @@ from .client import (
 )
 from .envelope import ANNOUNCE_MAILBOX, IdentityEnvelope, ValidationError
 from .igor_shim import IgorShim
+from .invalidator import Invalidator
 from .listener import AnnounceListener
 from .manifest import ANNOUNCE_EVENTS_MAILBOX, MANIFEST_SCHEMA_VERSION, Manifest
 from .profile import (
@@ -36,6 +37,7 @@ __all__ = [
     "DatacenterClient",
     "IdentityEnvelope",
     "IgorShim",
+    "Invalidator",
     "MANIFEST_SCHEMA_VERSION",
     "Manifest",
     "ManifestAssembler",
