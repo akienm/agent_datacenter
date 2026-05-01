@@ -1,0 +1,59 @@
+# Igor agent profile — canonical source.
+# Runtime copy lives at ~/.agent_datacenter/profiles/igor.yaml (synced on install).
+# Design: announce-protocol-design-2026-05-01-opus-pass.md § 4.3
+# Decision: D-announce-protocol-2026-05-01
+
+profile_version: "1.0"
+agent_type: igor
+description: "Master cognition tenant — full access to inference, memory, web, browser_use"
+inherits: []  # v1: inheritance not processed; slice 5 will add deep-merge
+
+# Devices this agent type may bind to.
+allowed_devices:
+  - inference
+  - postgres
+  - browser_use
+  - swadl
+  - discord_bot
+  - web_server
+
+# Per-device permission overlay — broker defaults to read_write when absent.
+device_permissions:
+  postgres:
+    mode: read_write
+    schema_filter:
+      - clan
+      - memory_palace
+  inference:
+    mode: read_write
+    rate_limit_per_min: 60
+  discord_bot:
+    mode: write_only
+
+# Channels joined by default (resolved against channel registry at announce time).
+default_channels:
+  - shared
+  - igor-cc
+
+# State references — where Igor's cognition state lives so it can reattach after restart.
+state_refs:
+  twm: "postgres://igor:choose_a_password@127.0.0.1/Igor-wild-0001#twm"
+  ne: "postgres://igor:choose_a_password@127.0.0.1/Igor-wild-0001#narrative_engine"
+  milieu: "postgres://igor:choose_a_password@127.0.0.1/Igor-wild-0001#milieu_state"
+
+# Permissions: who may send to Igor, who Igor may send to.
+acl:
+  inbound:
+    allow:
+      - "*"
+    deny: []
+  outbound:
+    allow:
+      - "*"
+    deny: []
+
+# Surfaces this profile activates by default.
+surfaces:
+  console: true
+  inference: true
+  mcp: false  # Igor does not expose MCP today
