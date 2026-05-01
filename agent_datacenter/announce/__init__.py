@@ -7,6 +7,11 @@ and the AnnounceListener publishes the reply on comms://announce-events.
 """
 
 from .broker import AnnounceBroker, AnnounceError, ManifestAssembler
+from .client import (
+    AnnounceRejectedError,
+    AnnounceTimeoutError,
+    DatacenterClient,
+)
 from .envelope import ANNOUNCE_MAILBOX, IdentityEnvelope, ValidationError
 from .listener import AnnounceListener
 from .manifest import ANNOUNCE_EVENTS_MAILBOX, MANIFEST_SCHEMA_VERSION, Manifest
@@ -24,7 +29,10 @@ __all__ = [
     "AnnounceBroker",
     "AnnounceError",
     "AnnounceListener",
+    "AnnounceRejectedError",
+    "AnnounceTimeoutError",
     "DEFAULT_PROFILES_DIR",
+    "DatacenterClient",
     "IdentityEnvelope",
     "MANIFEST_SCHEMA_VERSION",
     "Manifest",
