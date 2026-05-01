@@ -13,6 +13,7 @@ from .client import (
     DatacenterClient,
 )
 from .envelope import ANNOUNCE_MAILBOX, IdentityEnvelope, ValidationError
+from .igor_shim import IgorShim
 from .listener import AnnounceListener
 from .manifest import ANNOUNCE_EVENTS_MAILBOX, MANIFEST_SCHEMA_VERSION, Manifest
 from .profile import (
@@ -34,6 +35,7 @@ __all__ = [
     "DEFAULT_PROFILES_DIR",
     "DatacenterClient",
     "IdentityEnvelope",
+    "IgorShim",
     "MANIFEST_SCHEMA_VERSION",
     "Manifest",
     "ManifestAssembler",
