@@ -3,5 +3,35 @@ agent_datacenter.announce — capability announce protocol (v1).
 
 An agent plugs in by sending an IdentityEnvelope to comms://announce.
 The AnnounceBroker resolves the agent's profile, assembles a Manifest,
-and replies on the agent's primary mailbox.
+and the AnnounceListener publishes the reply on comms://announce-events.
 """
+
+from .broker import AnnounceBroker, AnnounceError, ManifestAssembler
+from .envelope import ANNOUNCE_MAILBOX, IdentityEnvelope, ValidationError
+from .listener import AnnounceListener
+from .manifest import ANNOUNCE_EVENTS_MAILBOX, MANIFEST_SCHEMA_VERSION, Manifest
+from .profile import (
+    DEFAULT_PROFILES_DIR,
+    ProfileNotFoundError,
+    ProfileValidationError,
+    load_profile,
+    profile_yaml_etag,
+)
+
+__all__ = [
+    "ANNOUNCE_EVENTS_MAILBOX",
+    "ANNOUNCE_MAILBOX",
+    "AnnounceBroker",
+    "AnnounceError",
+    "AnnounceListener",
+    "DEFAULT_PROFILES_DIR",
+    "IdentityEnvelope",
+    "MANIFEST_SCHEMA_VERSION",
+    "Manifest",
+    "ManifestAssembler",
+    "ProfileNotFoundError",
+    "ProfileValidationError",
+    "ValidationError",
+    "load_profile",
+    "profile_yaml_etag",
+]

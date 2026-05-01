@@ -23,6 +23,12 @@ from typing import TYPE_CHECKING
 
 from mcp.server.fastmcp import FastMCP
 
+from agent_datacenter.announce import (
+    ANNOUNCE_EVENTS_MAILBOX,
+    ANNOUNCE_MAILBOX,
+    AnnounceBroker,
+    AnnounceListener,
+)
 from agent_datacenter.device import BaseDevice, INTERFACE_VERSION
 from agent_datacenter.skeleton.exceptions import AuthError, RegistrationError
 from agent_datacenter.skeleton.health import (
@@ -35,6 +41,7 @@ from skeleton.registry import DeviceRegistry
 
 if TYPE_CHECKING:
     from bus.imap_server import IMAPServer
+    from pathlib import Path
 
 log = logging.getLogger(__name__)
 
@@ -48,10 +55,13 @@ class Skeleton(BaseDevice):
         self,
         registry: DeviceRegistry | None = None,
         imap_server: "IMAPServer | None" = None,
+        profiles_dir: "Path | str | None" = None,
     ) -> None:
         self._registry = registry or DeviceRegistry()
         self._imap_server = imap_server
         self._devices: dict[str, BaseDevice] = {}  # live device objects
+        self._announce_broker: AnnounceBroker | None = None
+        self._announce_listener: AnnounceListener | None = None
         self._mcp = FastMCP("agent_datacenter")
         self._setup_rack_tools()
         # Register self in the flat-file registry
@@ -61,7 +71,42 @@ class Skeleton(BaseDevice):
             "comms://skeleton",
             name="Skeleton",
         )
+        # Wire the announce protocol when a bus is attached.
+        if self._imap_server is not None:
+            self._bootstrap_announce(profiles_dir)
         log.info("skeleton initialized — rack.* tools registered")
+
+    def _bootstrap_announce(self, profiles_dir) -> None:
+        """
+        Create the announce + announce-events mailboxes and wire the broker
+        as a Skeleton sub-device. Pump is driven externally — a slice 3
+        IDLE loop will replace the manual pump() call seen in tests.
+        """
+        for mailbox in (ANNOUNCE_MAILBOX, ANNOUNCE_EVENTS_MAILBOX):
+            try:
+                self._imap_server.create_mailbox(mailbox)
+            except Exception as exc:
+                log.warning("announce: could not create mailbox %r: %s", mailbox, exc)
+        self._announce_broker = AnnounceBroker(
+            profiles_dir=profiles_dir,
+            registry=self._registry,
+            devices=self._devices,
+        )
+        self._announce_listener = AnnounceListener(
+            broker=self._announce_broker,
+            imap_server=self._imap_server,
+            from_device=self.DEVICE_ID,
+        )
+        log.info(
+            "announce: broker registered as skeleton sub-device "
+            "(announce + announce-events mailboxes ready)"
+        )
+
+    def announce_pump(self) -> int:
+        """Drive the announce listener once; returns processed envelope count."""
+        if self._announce_listener is None:
+            return 0
+        return self._announce_listener.pump()
 
     # ── MCP tool registration ─────────────────────────────────────────────────
 

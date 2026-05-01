@@ -1,12 +1,17 @@
 """
-AnnounceBroker — synchronous in-memory capability broker (slice 1).
+AnnounceBroker — synchronous capability broker.
 
 Takes an IdentityEnvelope, resolves the agent's profile, filters the
-registry to allowed+online devices, and assembles a Manifest.
+registry to allowed+online devices, and assembles a Manifest. The broker
+itself is pure: no IMAP I/O, no clock state. The IMAP-driven dispatch
+loop lives in announce.listener.AnnounceListener (slice 2), which calls
+resolve_announce() on each inbound envelope.
 
-Slice 1 scope: standalone, in-process, no IMAP wiring, no inotify.
-Slice 2 will register the broker as a sub-device of Skeleton and wire
-it to comms://announce.  Slice 3 adds live invalidation via inotify.
+Slice 1 (shipped): standalone in-process resolution.
+Slice 2 (shipped): Skeleton registers the broker + an AnnounceListener
+that pulls from comms://announce and publishes Manifests on
+comms://announce-events.
+Slice 3 (todo):    inotify-based push-on-change invalidation.
 """
 
 from __future__ import annotations
@@ -126,12 +131,21 @@ class AnnounceBroker:
         if self._registry is None:
             return []
         try:
-            return [
-                d for d in self._registry.list_devices() if d.get("status") == "online"
-            ]
+            raw = self._registry.list_devices()
         except Exception as exc:
             log.warning("broker: could not list registry devices: %s", exc)
             return []
+        # The flat-file DeviceRegistry exposes records keyed by 'id'; the
+        # FakeRegistry used in slice-1 tests uses 'device_id'. Normalize so
+        # downstream assembler code can rely on a consistent 'device_id' key.
+        normalized: list[dict] = []
+        for d in raw:
+            if d.get("status") != "online":
+                continue
+            if "device_id" not in d and "id" in d:
+                d = {**d, "device_id": d["id"]}
+            normalized.append(d)
+        return normalized
 
 
 class ManifestAssembler:

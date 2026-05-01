@@ -1,17 +1,23 @@
 """
 Skeleton tests — registration, health rollup, namespace collision.
 
-All tests use StubDevice and an in-memory registry (tmp_path) — no real
-Postgres or IMAP required.
+Most tests use StubDevice and an in-memory registry (tmp_path) — no real
+IMAP required. Announce-bootstrap tests opt into the IMAP stub via
+AGENT_DATACENTER_TEST_MODE=1 and exercise comms://announce mailboxes.
 """
 
 from __future__ import annotations
 
 import asyncio
+import os
+import shutil
 import time
 from pathlib import Path
 
 import pytest
+
+# Set test mode BEFORE importing anything that pulls in bus.imap_server.
+os.environ.setdefault("AGENT_DATACENTER_TEST_MODE", "1")
 
 from agent_datacenter.device import BaseDevice, INTERFACE_VERSION
 from agent_datacenter.skeleton.exceptions import AuthError, RegistrationError
@@ -21,10 +27,26 @@ from config.device_config import DeviceConfig
 from skeleton.registry import DeviceRegistry
 from tests.fixtures.stub_devices import StubDevice
 
+CANONICAL_PROFILES = Path(__file__).parent.parent / "config" / "profiles"
+
 
 def _make_skeleton(tmp_path: Path) -> Skeleton:
     registry = DeviceRegistry(path=tmp_path / "devices.json")
     return Skeleton(registry=registry)
+
+
+def _make_skeleton_with_bus(tmp_path: Path):
+    """Returns (skeleton, imap_server, profiles_dir). Caller must server.stop()."""
+    from bus.imap_server import IMAPServer
+
+    registry = DeviceRegistry(path=tmp_path / "devices.json")
+    server = IMAPServer()
+    server.start()
+    profiles_dir = tmp_path / "profiles"
+    profiles_dir.mkdir()
+    shutil.copy(CANONICAL_PROFILES / "igor.yaml", profiles_dir / "igor.yaml")
+    skel = Skeleton(registry=registry, imap_server=server, profiles_dir=profiles_dir)
+    return skel, server, profiles_dir
 
 
 # ── Registration ──────────────────────────────────────────────────────────────
@@ -163,3 +185,41 @@ def test_auth_halt_third_party_raises(tmp_path):
     skel.register_device(StubDevice())
     with pytest.raises(AuthError):
         skel._check_caller_auth("CC.0", "stub", "halt")
+
+
+# ── Announce bootstrap (slice 2) ──────────────────────────────────────────────
+
+
+def test_announce_bootstrap_creates_mailboxes(tmp_path):
+    skel, server, _ = _make_skeleton_with_bus(tmp_path)
+    try:
+        mailboxes = server.list_mailboxes()
+        assert "announce" in mailboxes
+        assert "announce-events" in mailboxes
+    finally:
+        server.stop()
+
+
+def test_announce_bootstrap_wires_broker_and_listener(tmp_path):
+    skel, server, _ = _make_skeleton_with_bus(tmp_path)
+    try:
+        assert skel._announce_broker is not None
+        assert skel._announce_listener is not None
+    finally:
+        server.stop()
+
+
+def test_announce_pump_is_noop_without_envelopes(tmp_path):
+    skel, server, _ = _make_skeleton_with_bus(tmp_path)
+    try:
+        assert skel.announce_pump() == 0
+    finally:
+        server.stop()
+
+
+def test_skeleton_without_bus_skips_announce(tmp_path):
+    """Skeleton with imap_server=None must not create broker/listener."""
+    skel = _make_skeleton(tmp_path)
+    assert skel._announce_broker is None
+    assert skel._announce_listener is None
+    assert skel.announce_pump() == 0
