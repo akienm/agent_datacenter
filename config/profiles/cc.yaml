@@ -1,0 +1,52 @@
+# Claude Code agent profile — canonical source.
+# Runtime copy lives at ~/.agent_datacenter/profiles/cc.yaml (synced on install).
+# Design: announce-protocol-design-2026-05-01-opus-pass.md § 4.3
+# Decision: D-announce-protocol-2026-05-01
+
+profile_version: "1.0"
+agent_type: cc
+description: "Claude Code session — coding agent, stateless across sessions, talks to Igor over the shared bus"
+inherits: [] # v1: inheritance not processed; slice 5 will add deep-merge
+
+# Devices CC may bind to. Stateless agent — no postgres, no discord_bot.
+allowed_devices:
+  - inference
+  - browser_use
+  - swadl
+
+# Per-device permission overlay.
+device_permissions:
+  inference:
+    mode: read_write
+    rate_limit_per_min: 120
+  browser_use:
+    mode: read_only
+  swadl:
+    mode: read_write
+
+# Channels joined by default.
+default_channels:
+  - shared
+  - igor-cc
+
+# State references — CC is stateless across sessions, so no persistent refs.
+state_refs: {}
+
+# Permissions: CC accepts inbound from skeleton + igor + shared, sends outbound to *.
+acl:
+  inbound:
+    allow:
+      - skeleton
+      - igor
+      - shared
+    deny: []
+  outbound:
+    allow:
+      - "*"
+    deny: []
+
+# Surfaces this profile activates by default.
+surfaces:
+  console: true
+  inference: true
+  mcp: true # CC consumes the skeleton MCP endpoint
