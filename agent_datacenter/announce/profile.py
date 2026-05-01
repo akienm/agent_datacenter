@@ -8,8 +8,12 @@ can bind to. They live at:
 
 The broker reads from the runtime directory; tests inject profiles_dir.
 
-v1: no profile inheritance (inherits: [] required). Inheritance with
-deep-merge + __replace__ marker is slated for slice 5.
+Inheritance (slice 5): a profile can declare inherits: [parent1, parent2].
+Parents are loaded recursively, deep-merged left-to-right, then the
+child's keys are layered on top. Lists in the child replace lists in
+parents (no implicit union — too magical). To explicitly drop or
+override a parent's value, use the {__replace__: True, value: ...}
+sentinel — the value field becomes the merged result.
 
 Note on lineage aliases: NOT present in this module by design. The
 E-decision (§ 14, 2026-05-01) resolved to ship clean — no backwards-compat
@@ -62,14 +66,24 @@ class ProfileValidationError(ValueError):
 def load_profile(
     agent_id: str,
     profiles_dir: Path | str | None = None,
+    _seen: tuple[str, ...] = (),
 ) -> dict:
     """
     Load profile YAML for agent_id from profiles_dir (default: runtime dir).
 
-    Returns the raw profile dict. v1 skips inheritance (inherits: [] only).
-    Raises ProfileNotFoundError if the file is absent.
-    Raises ProfileValidationError if required fields are missing.
+    Resolves inherits chains recursively (slice 5): parents merge
+    left-to-right, child layers on top. Dicts deep-merge; lists in the
+    child replace lists in parents; {__replace__: True, value: X} forces
+    a wholesale replacement.
+
+    Raises ProfileNotFoundError if the file (or any parent) is absent.
+    Raises ProfileValidationError if required fields are missing or a
+    cycle is detected in the inherits graph.
     """
+    if agent_id in _seen:
+        cycle = " → ".join(_seen + (agent_id,))
+        raise ProfileValidationError(f"Profile inheritance cycle detected: {cycle}")
+
     d = Path(profiles_dir) if profiles_dir is not None else DEFAULT_PROFILES_DIR
     path = d / f"{agent_id}.yaml"
     if not path.exists():
@@ -89,16 +103,23 @@ def load_profile(
     if unknown:
         log.debug("Profile %r has unrecognised keys: %s", agent_id, unknown)
 
-    inherits = profile.get("inherits", [])
-    if inherits:
-        log.warning(
-            "Profile %r declares inherits=%r but v1 does not process inheritance "
-            "(slice 5). Keys will not be merged.",
-            agent_id,
-            inherits,
-        )
+    inherits = profile.get("inherits", []) or []
+    if not inherits:
+        return _resolve_replace_markers(profile)
 
-    return profile
+    merged: dict = {}
+    next_seen = _seen + (agent_id,)
+    for parent_id in inherits:
+        parent_profile = load_profile(
+            parent_id, profiles_dir=profiles_dir, _seen=next_seen
+        )
+        merged = _deep_merge(merged, parent_profile)
+
+    final = _deep_merge(merged, profile)
+    # The child's own inherits list is metadata for the loader, not for
+    # downstream consumers — strip it from the resolved profile.
+    final["inherits"] = []
+    return _resolve_replace_markers(final)
 
 
 def profile_yaml_etag(agent_id: str, profiles_dir: Path | str | None = None) -> str:
@@ -118,3 +139,54 @@ def _validate(agent_id: str, profile: dict) -> None:
         raise ProfileValidationError(
             f"Profile for {agent_id!r} missing required fields: {missing}"
         )
+
+
+_REPLACE_MARKER = "__replace__"
+
+
+def _is_replace_marker(value) -> bool:
+    return (
+        isinstance(value, dict)
+        and value.get(_REPLACE_MARKER) is True
+        and "value" in value
+    )
+
+
+def _deep_merge(base: dict, overlay: dict) -> dict:
+    """
+    Recursively merge overlay onto base. Behavior:
+      - dicts merge key-by-key, recursing into nested dicts
+      - lists in overlay REPLACE lists in base (no implicit union)
+      - scalars in overlay replace scalars in base
+      - {__replace__: True, value: X} in overlay replaces wholesale —
+        the marker is unwrapped by _resolve_replace_markers at the end.
+    Returns a new dict; inputs are not mutated.
+    """
+    result: dict = dict(base)
+    for key, overlay_val in overlay.items():
+        if _is_replace_marker(overlay_val):
+            result[key] = overlay_val  # unwrap later in _resolve_replace_markers
+            continue
+        if (
+            key in result
+            and isinstance(result[key], dict)
+            and isinstance(overlay_val, dict)
+            and not _is_replace_marker(result[key])
+        ):
+            result[key] = _deep_merge(result[key], overlay_val)
+        else:
+            result[key] = overlay_val
+    return result
+
+
+def _resolve_replace_markers(profile: dict) -> dict:
+    """Walk the resolved profile and unwrap any remaining __replace__ markers."""
+    result: dict = {}
+    for key, value in profile.items():
+        if _is_replace_marker(value):
+            result[key] = value["value"]
+        elif isinstance(value, dict):
+            result[key] = _resolve_replace_markers(value)
+        else:
+            result[key] = value
+    return result
