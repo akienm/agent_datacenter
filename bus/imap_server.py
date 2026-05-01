@@ -146,12 +146,25 @@ async def _stub_handle_client(reader, writer):
             ev = threading.Event()
             mbox_key = mailbox or "INBOX"
             _STUB_IDLE_EVENTS[mbox_key].append(ev)
-            # run_in_executor so ev.wait() doesn't block the event loop
+            # run_in_executor so ev.wait() doesn't block the event loop.
+            # Poll with a short timeout so a closed writer (peer disconnect)
+            # exits IDLE cleanly — without this, the executor hangs on the
+            # threading.Event forever and the asyncio loop can't shutdown.
             loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, ev.wait)
+            woke = False
+            while not ev.is_set():
+                await loop.run_in_executor(None, ev.wait, 0.05)
+                if writer.is_closing():
+                    break
+            if ev.is_set():
+                woke = True
             _STUB_IDLE_EVENTS[mbox_key].remove(ev)
-            n = len(_STUB_MAILBOXES[mbox_key])
-            send(f"* {n} EXISTS\r\n")
+            if woke:
+                n = len(_STUB_MAILBOXES[mbox_key])
+                send(f"* {n} EXISTS\r\n")
+            else:
+                # Peer disconnected mid-IDLE — exit handler.
+                break
         elif cmd == "DONE":
             idling = False
             send(f"{tag} OK IDLE terminated\r\n")

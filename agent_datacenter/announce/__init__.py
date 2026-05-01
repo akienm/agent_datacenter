@@ -13,6 +13,7 @@ from .client import (
     DatacenterClient,
 )
 from .envelope import ANNOUNCE_MAILBOX, IdentityEnvelope, ValidationError
+from .idle_loop import AnnounceIdleLoop
 from .igor_shim import IgorShim
 from .invalidator import Invalidator
 from .listener import AnnounceListener
@@ -30,6 +31,7 @@ __all__ = [
     "ANNOUNCE_MAILBOX",
     "AnnounceBroker",
     "AnnounceError",
+    "AnnounceIdleLoop",
     "AnnounceListener",
     "AnnounceRejectedError",
     "AnnounceTimeoutError",
