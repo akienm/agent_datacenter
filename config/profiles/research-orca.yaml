@@ -1,0 +1,48 @@
+# Example research-orca agent profile — demonstrates a non-Igor agent type.
+# Runtime copy lives at ~/.agent_datacenter/profiles/research-orca.yaml (synced on install).
+# Design: announce-protocol-design-2026-05-01-opus-pass.md § 4.3
+# Decision: D-announce-protocol-2026-05-01
+
+profile_version: "1.0"
+agent_type: research-orca
+description: "Research agent — inference + browser_use only, narrow ACL, joins shared channel"
+inherits: [] # v1: inheritance not processed; slice 5 will add deep-merge
+
+# Devices research-orca may bind to. Narrow surface — no postgres, no discord, no swadl.
+allowed_devices:
+  - inference
+  - browser_use
+
+device_permissions:
+  inference:
+    mode: read_write
+    rate_limit_per_min: 30
+  browser_use:
+    mode: read_write
+
+# Single shared channel — no private channel needed for the example agent.
+default_channels:
+  - shared
+
+# Stateless example — no persistent state refs.
+state_refs: {}
+
+# Narrow ACL: only skeleton, cc, igor may send in; outbound limited to shared + cc.
+acl:
+  inbound:
+    allow:
+      - skeleton
+      - cc
+      - igor
+    deny: []
+  outbound:
+    allow:
+      - shared
+      - cc
+    deny: []
+
+# Surfaces — research-orca runs headless, no mcp surface.
+surfaces:
+  console: true
+  inference: true
+  mcp: false

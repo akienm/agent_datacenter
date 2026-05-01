@@ -218,3 +218,74 @@ def test_broker_with_no_registry_returns_empty_tools(
 
 def test_announce_mailbox_constant() -> None:
     assert ANNOUNCE_MAILBOX == "announce"
+
+
+# ── Additional canonical profiles (slice 2) ───────────────────────────────────
+
+
+def _profiles_dir_with(tmp_path: Path, *names: str) -> Path:
+    for name in names:
+        shutil.copy(CANONICAL_PROFILES / name, tmp_path / name)
+    return tmp_path
+
+
+def test_cc_profile_loads_and_has_expected_shape(tmp_path: Path) -> None:
+    from agent_datacenter.announce.profile import load_profile
+
+    pdir = _profiles_dir_with(tmp_path, "cc.yaml")
+    profile = load_profile("cc", profiles_dir=pdir)
+
+    assert profile["agent_type"] == "cc"
+    assert "inference" in profile["allowed_devices"]
+    assert "postgres" not in profile["allowed_devices"]  # CC is stateless
+    assert "shared" in profile["default_channels"]
+    assert "igor-cc" in profile["default_channels"]
+    assert profile["state_refs"] == {}
+    assert "skeleton" in profile["acl"]["inbound"]["allow"]
+    assert profile["surfaces"]["mcp"] is True
+
+
+def test_research_orca_profile_loads_and_has_expected_shape(tmp_path: Path) -> None:
+    from agent_datacenter.announce.profile import load_profile
+
+    pdir = _profiles_dir_with(tmp_path, "research-orca.yaml")
+    profile = load_profile("research-orca", profiles_dir=pdir)
+
+    assert profile["agent_type"] == "research-orca"
+    assert profile["allowed_devices"] == ["inference", "browser_use"]
+    assert profile["default_channels"] == ["shared"]
+    assert profile["state_refs"] == {}
+    assert profile["acl"]["inbound"]["allow"] == ["skeleton", "cc", "igor"]
+    assert profile["acl"]["outbound"]["allow"] == ["shared", "cc"]
+    assert profile["surfaces"]["mcp"] is False
+
+
+def test_broker_resolves_research_orca_with_narrow_devices(tmp_path: Path) -> None:
+    from agent_datacenter.announce.broker import AnnounceBroker
+    from agent_datacenter.announce.envelope import IdentityEnvelope
+
+    pdir = _profiles_dir_with(tmp_path, "research-orca.yaml")
+    registry = _FakeRegistry(
+        [
+            {"device_id": "inference", "status": "online"},
+            {"device_id": "browser_use", "status": "online"},
+            {"device_id": "postgres", "status": "online"},  # online but not allowed
+        ]
+    )
+    devices = {
+        "inference": _FakeDevice("inference", "comms://inference"),
+        "browser_use": _FakeDevice("browser_use", "comms://browser_use"),
+        "postgres": _FakeDevice("postgres", "comms://postgres"),
+    }
+    broker = AnnounceBroker(profiles_dir=pdir, registry=registry, devices=devices)
+    env = IdentityEnvelope(
+        agent_id="research-orca",
+        instance="orca-1",
+        box="researchhost",
+        box_n=2,
+        pid=8888,
+        interface_version="1.0",
+    )
+    manifest = broker.resolve_announce(env)
+    tool_names = {t.name for t in manifest.tools}
+    assert tool_names == {"inference", "browser_use"}  # postgres excluded
