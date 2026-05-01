@@ -29,6 +29,7 @@ from agent_datacenter.announce import (
     AnnounceBroker,
     AnnounceListener,
 )
+from agent_datacenter.announce.manifest import INVALIDATE_MAILBOX
 from agent_datacenter.device import BaseDevice, INTERFACE_VERSION
 from agent_datacenter.skeleton.exceptions import AuthError, RegistrationError
 from agent_datacenter.skeleton.health import (
@@ -82,7 +83,7 @@ class Skeleton(BaseDevice):
         as a Skeleton sub-device. Pump is driven externally — a slice 3
         IDLE loop will replace the manual pump() call seen in tests.
         """
-        for mailbox in (ANNOUNCE_MAILBOX, ANNOUNCE_EVENTS_MAILBOX):
+        for mailbox in (ANNOUNCE_MAILBOX, ANNOUNCE_EVENTS_MAILBOX, INVALIDATE_MAILBOX):
             try:
                 self._imap_server.create_mailbox(mailbox)
             except Exception as exc:

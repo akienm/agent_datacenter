@@ -290,3 +290,147 @@ def test_announce_ignores_replies_addressed_to_other_agents(server, listener):
 
     # Got our own manifest, not the bystander reply.
     assert manifest["issued_to"]["agent_id"] == "igor"
+
+
+# ── check_for_invalidate (slice 3b) ───────────────────────────────────────────
+
+
+def _post_invalidate(server, target, reason="changed"):
+    """Helper: drop a kind=invalidate envelope onto comms://invalidate."""
+    from agent_datacenter.announce.manifest import INVALIDATE_MAILBOX
+
+    server.create_mailbox(INVALIDATE_MAILBOX)  # idempotent
+    env = Envelope.now(
+        from_device="invalidator",
+        to_device=INVALIDATE_MAILBOX,
+        payload={"kind": "invalidate", "target": target, "reason": reason},
+    )
+    server.append(INVALIDATE_MAILBOX, env)
+
+
+def test_check_for_invalidate_zero_when_no_envelopes(server, igor_identity):
+    client = DatacenterClient(identity=igor_identity, imap_server=server)
+    assert client.check_for_invalidate() == 0
+
+
+def test_invalidate_for_our_agent_triggers_reannounce(server, listener, igor_identity):
+    """Post an invalidate for igor; check_for_invalidate re-announces."""
+    client = DatacenterClient(identity=igor_identity, imap_server=server)
+    posted = client._imap.append
+
+    def post_then_pump(mailbox, env):
+        posted(mailbox, env)
+        if mailbox == ANNOUNCE_MAILBOX:
+            listener.pump()
+
+    client._imap.append = post_then_pump  # type: ignore[assignment]
+    try:
+        # Initial announce.
+        first = client.announce(timeout=2.0)
+        first_id = first["manifest_id"]
+
+        _post_invalidate(server, target="igor", reason="changed")
+        handled = client.check_for_invalidate(reannounce_timeout=2.0)
+        assert handled == 1
+
+        # Cached manifest replaced — manifest_id is fresh.
+        assert client.manifest is not None
+        assert client.manifest["manifest_id"] != first_id
+    finally:
+        client._imap.append = posted
+
+
+def test_invalidate_for_registry_triggers_reannounce(server, listener, igor_identity):
+    client = DatacenterClient(identity=igor_identity, imap_server=server)
+    posted = client._imap.append
+
+    def post_then_pump(mailbox, env):
+        posted(mailbox, env)
+        if mailbox == ANNOUNCE_MAILBOX:
+            listener.pump()
+
+    client._imap.append = post_then_pump  # type: ignore[assignment]
+    try:
+        first = client.announce(timeout=2.0)
+        _post_invalidate(server, target="registry", reason="changed")
+        handled = client.check_for_invalidate(reannounce_timeout=2.0)
+        assert handled == 1
+        assert client.manifest["manifest_id"] != first["manifest_id"]
+    finally:
+        client._imap.append = posted
+
+
+def test_invalidate_for_other_agent_ignored(server, listener, igor_identity):
+    """target=cc when we are igor → no re-announce, manifest unchanged."""
+    client = DatacenterClient(identity=igor_identity, imap_server=server)
+    posted = client._imap.append
+
+    def post_then_pump(mailbox, env):
+        posted(mailbox, env)
+        if mailbox == ANNOUNCE_MAILBOX:
+            listener.pump()
+
+    client._imap.append = post_then_pump  # type: ignore[assignment]
+    try:
+        first = client.announce(timeout=2.0)
+        first_id = first["manifest_id"]
+        _post_invalidate(server, target="cc", reason="changed")
+        handled = client.check_for_invalidate(reannounce_timeout=2.0)
+        assert handled == 0
+        # Manifest unchanged.
+        assert client.manifest["manifest_id"] == first_id
+    finally:
+        client._imap.append = posted
+
+
+def test_check_for_invalidate_handles_reannounce_timeout_gracefully(
+    server, listener, igor_identity
+):
+    """Re-announce times out → keep stale manifest, return 0, no exception."""
+    client = DatacenterClient(identity=igor_identity, imap_server=server)
+    posted = client._imap.append
+
+    def post_then_pump(mailbox, env):
+        posted(mailbox, env)
+        if mailbox == ANNOUNCE_MAILBOX:
+            listener.pump()
+
+    client._imap.append = post_then_pump  # type: ignore[assignment]
+    try:
+        first = client.announce(timeout=2.0)
+        # Take the listener offline so re-announce can't get a manifest.
+        client._imap.append = posted  # restore — no more pumping
+        _post_invalidate(server, target="igor", reason="changed")
+        handled = client.check_for_invalidate(
+            reannounce_timeout=0.2, reannounce_poll_interval=0.05
+        )
+        assert handled == 0
+        # Stale manifest preserved.
+        assert client.manifest["manifest_id"] == first["manifest_id"]
+    finally:
+        client._imap.append = posted
+
+
+def test_invalidate_coalesces_multiple_envelopes_in_one_pump(
+    server, listener, igor_identity
+):
+    """3 invalidates posted at once → one re-announce satisfies them all."""
+    client = DatacenterClient(identity=igor_identity, imap_server=server)
+    posted = client._imap.append
+
+    def post_then_pump(mailbox, env):
+        posted(mailbox, env)
+        if mailbox == ANNOUNCE_MAILBOX:
+            listener.pump()
+
+    client._imap.append = post_then_pump  # type: ignore[assignment]
+    try:
+        client.announce(timeout=2.0)
+        _post_invalidate(server, target="igor")
+        _post_invalidate(server, target="registry")
+        _post_invalidate(server, target="igor")
+        handled = client.check_for_invalidate(reannounce_timeout=2.0)
+        # Coalesced: still just one re-announce.
+        assert handled == 1
+    finally:
+        client._imap.append = posted

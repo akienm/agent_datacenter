@@ -15,10 +15,8 @@ os.environ.setdefault("AGENT_DATACENTER_TEST_MODE", "1")
 
 import pytest
 
-from agent_datacenter.announce import (
-    ANNOUNCE_EVENTS_MAILBOX,
-    Invalidator,
-)
+from agent_datacenter.announce import Invalidator
+from agent_datacenter.announce.manifest import INVALIDATE_MAILBOX
 from bus.imap_server import IMAPServer
 
 CANONICAL_PROFILES = Path(__file__).parent.parent / "config" / "profiles"
@@ -31,7 +29,7 @@ CANONICAL_PROFILES = Path(__file__).parent.parent / "config" / "profiles"
 def server():
     s = IMAPServer()
     s.start()
-    s.create_mailbox(ANNOUNCE_EVENTS_MAILBOX)
+    s.create_mailbox(INVALIDATE_MAILBOX)
     yield s
     s.stop()
 
@@ -45,7 +43,7 @@ def profiles_dir(tmp_path: Path) -> Path:
 
 
 def _drain_events(server: IMAPServer) -> list:
-    return server.fetch_unseen(ANNOUNCE_EVENTS_MAILBOX)
+    return server.fetch_unseen(INVALIDATE_MAILBOX)
 
 
 # ── Profile diffing ──────────────────────────────────────────────────────────

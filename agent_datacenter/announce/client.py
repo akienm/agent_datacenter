@@ -29,10 +29,13 @@ from .envelope import ANNOUNCE_MAILBOX, IdentityEnvelope
 from .manifest import (
     ACL,
     ANNOUNCE_EVENTS_MAILBOX,
+    INVALIDATE_MAILBOX,
     ChannelSubscription,
     StateRef,
     ToolBinding,
 )
+
+REGISTRY_TARGET = "registry"  # invalidates targeted at all clients
 
 log = logging.getLogger(__name__)
 
@@ -119,6 +122,53 @@ class DatacenterClient:
             f"No manifest received on {ANNOUNCE_EVENTS_MAILBOX} within "
             f"{timeout}s for {target_mailbox!r}"
         )
+
+    def check_for_invalidate(
+        self,
+        reannounce_timeout: float = DEFAULT_ANNOUNCE_TIMEOUT,
+        reannounce_poll_interval: float = DEFAULT_POLL_INTERVAL,
+    ) -> int:
+        """
+        Drain comms://invalidate, react to any envelope whose target matches
+        this client's agent_id (or 'registry' which all clients heed) by
+        re-announcing and replacing the cached manifest atomically. Returns
+        the number of invalidates that triggered a re-announce.
+
+        Non-matching invalidates (other agents) are dropped silently.
+        Re-announce timeouts are caught — the cached manifest is left
+        unchanged and the count for that envelope is not incremented.
+        """
+        try:
+            envelopes = self._imap.fetch_unseen(INVALIDATE_MAILBOX)
+        except Exception as exc:
+            log.warning("client: fetch from %s failed: %s", INVALIDATE_MAILBOX, exc)
+            return 0
+
+        my_agent_id = self._identity.agent_id
+        handled = 0
+        relevant = False
+        for env in envelopes:
+            if env.payload.get("kind") != "invalidate":
+                continue
+            target = env.payload.get("target", "")
+            if target == my_agent_id or target == REGISTRY_TARGET:
+                relevant = True
+
+        if not relevant:
+            return 0
+
+        # Coalesce: one re-announce satisfies all matched invalidates in this batch.
+        try:
+            self.announce(
+                timeout=reannounce_timeout, poll_interval=reannounce_poll_interval
+            )
+            handled = 1
+        except (AnnounceTimeoutError, AnnounceRejectedError) as exc:
+            log.warning(
+                "client: re-announce after invalidate failed: %s — keeping stale manifest",
+                exc,
+            )
+        return handled
 
     # ── Accessors ─────────────────────────────────────────────────────────────
 

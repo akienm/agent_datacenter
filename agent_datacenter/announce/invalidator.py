@@ -28,7 +28,7 @@ from bus.envelope import Envelope
 from bus.imap_server import IMAPServer
 
 from .manifest import (
-    ANNOUNCE_EVENTS_MAILBOX,
+    INVALIDATE_MAILBOX,
     profile_etag_from_yaml,
     registry_etag_from_dict,
 )
@@ -135,7 +135,7 @@ class Invalidator:
     def _publish_invalidate(self, target: str, reason: str) -> None:
         env = Envelope.now(
             from_device=self._from_device,
-            to_device=ANNOUNCE_EVENTS_MAILBOX,
+            to_device=INVALIDATE_MAILBOX,
             payload={
                 "kind": "invalidate",
                 "target": target,  # agent_id or REGISTRY_TARGET
@@ -143,7 +143,7 @@ class Invalidator:
             },
         )
         try:
-            self._imap.append(ANNOUNCE_EVENTS_MAILBOX, env)
+            self._imap.append(INVALIDATE_MAILBOX, env)
         except Exception as exc:
             log.warning(
                 "invalidator: failed to publish invalidate for %r: %s", target, exc

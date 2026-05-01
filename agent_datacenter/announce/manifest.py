@@ -20,6 +20,10 @@ from datetime import datetime, timezone
 
 MANIFEST_SCHEMA_VERSION = "1.0"
 ANNOUNCE_EVENTS_MAILBOX = "announce-events"
+# Cache-invalidation pushes go to a separate mailbox so consumers reading
+# invalidates (DatacenterClient.check_for_invalidate) don't race with the
+# poll loop in DatacenterClient.announce(). § 14 / slice 3b architecture.
+INVALIDATE_MAILBOX = "invalidate"
 
 
 @dataclass
