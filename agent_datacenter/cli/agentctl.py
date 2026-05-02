@@ -206,5 +206,52 @@ def status() -> None:
         sys.exit(1)
 
 
+@cli.group()
+def skills() -> None:
+    """Manage Claude Code skill deploys (master in agent_datacenter/skills/)."""
+
+
+@skills.command("deploy")
+def skills_deploy() -> None:
+    """Deploy manifest-listed skills to ~/.claude/skills/ (rsync on Linux/Mac)."""
+    from devices.installer import deploy_skills
+
+    result = deploy_skills()
+    click.echo(f"deployed:               {len(result.deployed)}")
+    for name in result.deployed:
+        click.echo(f"  + {name}")
+    if result.skipped_not_for_host:
+        click.echo(f"\nskipped (other hosts):  {len(result.skipped_not_for_host)}")
+    if result.skipped_disabled:
+        click.echo(f"skipped (disabled):     {len(result.skipped_disabled)}")
+    if result.skipped_missing_source:
+        click.echo(
+            f"skipped (no source):    {len(result.skipped_missing_source)} — "
+            f"{', '.join(result.skipped_missing_source)}"
+        )
+    if result.untouched_local:
+        click.echo(
+            f"\nuntouched local skills: {len(result.untouched_local)} — "
+            f"{', '.join(result.untouched_local)}"
+        )
+
+
+@skills.command("status")
+def skills_status() -> None:
+    """Show what's managed vs local-only on this host."""
+    from devices.installer import deploy_status
+
+    info = deploy_status()
+    click.echo(f"host:         {info['host']}")
+    click.echo(f"manifest:     {info['manifest_path']}")
+    click.echo(f"target:       {info['target']}")
+    click.echo(f"managed:      {len(info['managed_for_host'])}")
+    click.echo(f"present:      {len(info['present_in_target'])}")
+    if info["local_only"]:
+        click.echo(f"local-only:   {', '.join(info['local_only'])}")
+    if info["missing_in_target"]:
+        click.echo(f"NOT deployed: {', '.join(info['missing_in_target'])}")
+
+
 def main() -> None:
     cli()
