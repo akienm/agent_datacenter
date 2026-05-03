@@ -1,0 +1,177 @@
+---
+name: context-load
+description: Session startup — palace briefing + slate + decisions + channel. 2000-token budget.
+model: haiku
+---
+
+# context-load — Session startup
+
+## Step 0.25 — Stale slate check (soft prompt to close previous day)
+```bash
+python3 ~/TheIgors/lab/claudecode/stale_slate_check.py
+```
+
+Soft prompt — when the most-recent prior-day slate has open items in
+`## Next up`, `## Blocked`, or `## After that` AND lacks a `✅ CLOSED`
+marker, the check emits a warning. Silent when the prior slate is fully
+closed, empty, or doesn't exist.
+
+When the warning fires, always surface it to Akien and offer: run
+`/day-close` on the stale date, defer, or skip. Soft prompt, not a gate —
+Akien decides.
+
+## Step 0.5 — Debug flag
+```bash
+touch ~/.TheIgors/Igor-wild-0001/debug_session.flag
+```
+
+## Step 1 — Today's slate
+
+Always ensure today's slate exists — context-load creates one when the
+current day has no file yet:
+```bash
+SLATE=~/.TheIgors/claudecode/$(date +%Y%m%d).slate.txt
+if [ ! -f "$SLATE" ]; then
+  mkdir -p "$(dirname "$SLATE")"
+  cat > "$SLATE" <<EOF
+# Slate $(date +%Y-%m-%d)
+
+## Notes
+
+## In-flight
+NONE
+
+## Planned
+
+## Ad hoc
+
+## Done today
+EOF
+fi
+cat "$SLATE"
+```
+
+Section order is salience-first (D-slate-salience-order-2026-04-20): read
+top-down, stop once you have enough context. Notes = short-term reminders
+(carry forward N days, drop when stale — kept at top so they're actually
+read); In-flight = what's mid-work; Planned = what to pick up next; Ad hoc
+= today's reactive additions; Done today = shipped.
+
+## Step 2a — Rules (hash-gated; read these FIRST when changed)
+
+Always check the rules hash before reading — the rules only reload when
+something changed since last session:
+```bash
+HASH_FILE=~/.TheIgors/claudecode/rules_hash.txt
+CURRENT_HASH=$(psql postgresql://igor:choose_a_password@127.0.0.1/Igor-wild-0001 -tAc \
+  "SELECT md5(string_agg(path || '|' || coalesce(content,''), '||' ORDER BY path))
+   FROM memory_palace WHERE path LIKE 'theigors/rules/%'")
+SAVED_HASH=$(cat "$HASH_FILE" 2>/dev/null | head -1)
+if [ "$CURRENT_HASH" = "$SAVED_HASH" ]; then
+  echo "rules: unchanged since last session (hash=${CURRENT_HASH:0:8}...) — skipping full load"
+else
+  echo "rules: changed (${SAVED_HASH:0:8}... → ${CURRENT_HASH:0:8}...) — loading"
+  psql postgresql://igor:choose_a_password@127.0.0.1/Igor-wild-0001 -c \
+    "SELECT title, content FROM memory_palace
+     WHERE path LIKE 'theigors/rules/%' ORDER BY path" -tA
+  echo "$CURRENT_HASH" > "$HASH_FILE"
+fi
+```
+
+Canonical rules live in the palace DB (T-rules-canonical-db-first, 2026-04-20).
+CLAUDE.md is a thin shim — palace wins on conflict. Read order: persona →
+coding → commits → memory → database → budget → collaboration →
+igor-constraints → docs-live-in-code → do-not.
+
+## Step 2b — Memory palace tree (hash-gated)
+```bash
+TREE_HASH_FILE=~/.TheIgors/claudecode/palace_tree_hash.txt
+CURRENT_TREE_HASH=$(psql postgresql://igor:choose_a_password@127.0.0.1/Igor-wild-0001 -tAc \
+  "SELECT md5(string_agg(path || '|' || coalesce(title,''), '||' ORDER BY path)) FROM memory_palace")
+SAVED_TREE_HASH=$(cat "$TREE_HASH_FILE" 2>/dev/null | head -1)
+if [ "$CURRENT_TREE_HASH" = "$SAVED_TREE_HASH" ]; then
+  echo "palace tree: unchanged (hash=${CURRENT_TREE_HASH:0:8}...) — skipping listing"
+else
+  psql postgresql://igor:choose_a_password@127.0.0.1/Igor-wild-0001 -c \
+    "SELECT path, title FROM memory_palace ORDER BY path" -t
+  echo "$CURRENT_TREE_HASH" > "$TREE_HASH_FILE"
+fi
+```
+
+The palace is the navigable map. Each node is a signpost — title + pointer
+to where the real info lives (code, DB, tools, docs).
+
+Always use the MCP tools to query specific nodes during a session:
+```
+memory_get(path="theigors/rules/coding")       # exact node read
+memory_search(query="...")                     # topic lookup
+memory_list_by_type(type="RULE")               # typed listing
+```
+The raw psql path remains available for bulk operations, but `memory_get`
+is the frictionless default for single-node reads in a working session.
+
+## Step 3 — Decisions hot window (last 10)
+```bash
+tail -10 ~/TheIgors/lab/design_docs_for_igor/decisions_log.dsb | sed 's/|/ — /g'
+```
+
+## Step 4 — Channel (last 5)
+
+Always use the MCP channel read for this — matches how other sessions and
+Igor himself read the channel, stays consistent across machines:
+```
+mcp__igor__channel_read(limit=5)
+```
+Fallback (shared Postgres channel, all machines):
+```bash
+python3 ~/TheIgors/lab/claudecode/channel.py read 5
+```
+
+## Step 5 — Pending approvals
+```bash
+python3 ~/TheIgors/lab/claudecode/cc_queue.py list 2>/dev/null | grep "🟠"
+```
+
+## Step 5.6 — Unread CC inbox
+
+Always check the inbox — pushes from Igor subsystems (pe_chain escalations,
+scope_guard blocks, go-live-when trips) land here and need surfacing:
+```bash
+python3 -c "
+from lab.claudecode.cc_inbox import read_unread
+entries = read_unread()
+if entries:
+    high = sum(1 for e in entries if e.urgency == 'high')
+    needs_reply = sum(1 for e in entries if e.response_expected)
+    print(f'Inbox: {len(entries)} unread ({high} high, {needs_reply} need reply)')
+    for e in entries[:5]:
+        urg = '!' if e.urgency == 'high' else '·' if e.urgency == 'low' else ' '
+        tk = f' [{e.ticket_id}]' if e.ticket_id else ''
+        print(f'  [{urg}] {e.kind}{tk}: {e.summary}')
+else:
+    print('Inbox: empty')
+"
+```
+
+When unread exists, always surface the summary to Akien, then invoke
+/readinbox to see full details and mark-read.
+
+## Step 6 — Assemble briefing
+
+Always stay inside the 2000-token (~8000-char) budget. Output shape:
+```
+CONTEXT LOAD — <timestamp>
+In-flight: <## In-flight line from slate, or NONE>
+Active: <ticket IDs from slate>
+Palace: <node count + top-level branches>
+Decisions: <one-line from tail>
+Channel: <recent or "quiet">
+[~NNN tokens]
+Ready.
+```
+
+## Hard rules
+- Always stay within the 2000-token budget.
+- Per-blob read cap: 40 lines.
+- When a question maps to a palace branch, always read that node first (`memory_get(path=...)`) — palace-first over codebase grep.
+- Palace is the index; code is the truth. When palace says X and code says Y, trust the code and update the palace.
