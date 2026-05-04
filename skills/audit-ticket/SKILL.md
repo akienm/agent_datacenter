@@ -93,6 +93,51 @@ Does the ticket description include an `audit-emphasis` directive?
 
 Note the tag (or absence) in output so downstream audit routing can act on it.
 
+### 16. Two-sided build for capability tickets
+
+Enforces theigors/rules/capability-protocol/two-sided-build: a ticket that
+adds a new capability must ship handler AND skill consumer together — never
+just one half.
+
+**Trigger:** the ticket is a capability ticket. Detect via either:
+- `tags` includes `Capability`, OR
+- description mentions `MCP capability`, `shim`, or `handler` in a creator
+  sense (not just referencing existing ones)
+
+**Skip when:** the description carries an explicit exemption line of the
+form `exempt from theigors/rules/capability-protocol/two-sided-build` with
+a stated reason (e.g. "consumes existing capability surface, doesn't create
+one" — pure skill-consumer tickets, OR "is the enforcer, not a consumer" —
+the rule-implementing ticket itself). Note the exemption in output.
+
+**Check:** scan Affected files for both sides:
+- HANDLER paths (any one match): `agent_datacenter/devices/`,
+  `lab/claudecode/mcp_*`, `wild_igor/igor/**/device*.py`,
+  `agent_datacenter/**/capability*.py`
+- SKILL CONSUMER paths (any one match): `/home/akien/.claude/skills/*`
+
+Both sides present → PASS this check.
+
+Only one side present (and no exemption) → **SPLIT** with sequencing:
+```
+SPLIT: capability ticket missing one side
+  - T-<orig>-handler — build the capability (handler files only)
+  - T-<orig>-consumer — migrate skills to use it (skill files only)
+    GATE: T-<orig>-handler closed
+```
+The handler ticket always runs first; the consumer is gated on the
+handler closing. Never silently auto-split — emit the proposal for human
+review.
+
+**Test cases (documented for CC.1 integration testing — T-cc1-test-minion):**
+| Ticket shape | Expected verdict on check 16 |
+|---|---|
+| tags=[Capability], handler file + skill file | PASS |
+| tags=[Capability], handler file only | SPLIT |
+| tags=[Capability], skill file only | SPLIT |
+| tags=[Capability], skill file only + exempt-line in body | PASS (note exemption) |
+| tags=[Skills], no handler/MCP keywords in body | SKIP (not a capability ticket) |
+
 ## Output format
 
 ```
@@ -117,9 +162,12 @@ Child proposals (if SPLIT): <list>
 
 ## Hard rules
 
-- Always run checks 1–8 first, then checks 9–15.
+- Always run checks 1–8 first, then checks 9–16.
 - AMEND on missing validation steps — "tests pass" is not a runtime validation.
 - SPLIT when verb count ≥ 3 in a ticket > S size.
+- SPLIT capability tickets that ship only one side (handler XOR skill
+  consumer) — unless the ticket carries an explicit two-sided-build
+  exemption line with a stated reason.
 - HIGH-inertia rollback plan is required — ask Akien if unclear.
 - Emit per-run telemetry:
   `from lab.claudecode.audit_telemetry import emit_run_record, AuditRunRecord`
