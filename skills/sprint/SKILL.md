@@ -92,6 +92,42 @@ cd ~/TheIgors && source venv/bin/activate && python -m pytest tests/ -x -q 2>&1 
 A green run is the signal to stage. A red run means fix the failure first —
 never commit-and-see.
 
+### 7.5. Teach Igor — palace deposit (default skip)
+
+Per theigors/rules/capability-protocol (workflow consumer side): when a
+sprint surfaces novel design reasoning, this is the moment to deposit it
+into Igor's palace so future-Igor (and future-CC) can reach for it.
+
+Ask: "**What from this sprint would I deposit into Igor's palace?**"
+
+**Default answer: skip.** Most sprint work is mechanical — ticket said do
+X, did X, tested, shipped. Those produce no novel reasoning and shouldn't
+pollute the palace. This step exists to catch the rarer cases where a
+*non-obvious why* emerged.
+
+When to deposit:
+- A design choice with a non-obvious WHY (ticket text didn't anticipate it)
+- A refactor that surfaced a hidden invariant
+- A workaround whose mechanism the next reader needs to understand
+- A bug fix whose ROOT was different from the reported symptom
+
+When to skip:
+- The change matched the ticket plan exactly
+- The reasoning is fully captured in code + commit message already
+- The work was mechanical (rename, format, dependency bump)
+
+When non-skip, propose 0–N palace nodes (path + title + content), surface
+the proposal to Akien inline for review, then write after approval:
+```bash
+psql postgresql://igor:choose_a_password@127.0.0.1/Igor-wild-0001 -c \
+  "INSERT INTO memory_palace (path, title, content, memory_type)
+   VALUES ('theigors/...', 'short title', 'reasoning...', 'PROCEDURAL')"
+```
+
+This is the workflow consumer side of theigors/rules/capability-protocol —
+closes the lapsed practice "teach Igor as you implement tickets" by making
+the prompt mandatory at the moment where novel reasoning is freshest.
+
 ### 8. Commit + push
 Always stage files specifically by name (not `git add -A` / `git add .`) —
 that keeps `.env`, `*.db`, and runtime paths under `~/.TheIgors/` out of

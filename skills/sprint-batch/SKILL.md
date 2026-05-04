@@ -71,6 +71,7 @@ For each ticket in topo-order, run the /sprint body:
 4. **Test**: `python -m pytest tests/ -x -q 2>&1 | tail -20`
 5. **Cleanup** (REQUIRED): always review the diff and remove debris — debug prints, commented code, unused imports, replaced functions, single-use helpers, temp files. Every file in the diff exists on purpose.
 6. **Doc-refresh** (when a load-bearing file is touched, per T-docs-live-in-code): always update the top-of-file docstring alongside the code change.
+6.5. **Teach Igor — palace deposit (default skip)**: ask "what from this ticket would I deposit into Igor's palace?" Default answer: **skip** — most sprint work is mechanical and shouldn't pollute the palace. Deposit only when novel reasoning emerged: a non-obvious WHY the ticket didn't anticipate, a hidden invariant the refactor surfaced, a workaround whose mechanism the next reader needs, or a bug fix whose ROOT differed from the symptom. When non-skip: propose 0–N palace nodes (path + title + content), surface to Akien inline for review, then INSERT via psql to memory_palace. Workflow consumer of theigors/rules/capability-protocol — closes the "teach Igor as you implement tickets" lapse.
 7. **Commit + push** (full cycle, with stash when Igor auto-edits interfere):
    ```bash
    git stash -u && git pull --rebase origin main && git stash pop
@@ -78,7 +79,11 @@ For each ticket in topo-order, run the /sprint body:
    git commit -m "..."
    git push origin main
    ```
-8. **Close**: `cc_queue.py done <id> "<summary of what was built>"`
+8. **Close**: `cc_queue.py done <id> "<summary of what was built>"` then retitle to add `CLOSED:` prefix:
+   ```bash
+   # Strip old prefix (DESIGNED:/NEW:/NEEDS DESIGN:) and prepend CLOSED:
+   python3 ~/TheIgors/lab/claudecode/cc_queue.py retitle <id> "CLOSED: <bare-title>"
+   ```
 9. **Retroactive incidental ticket** (T-sync-on-close-not-dayend pattern): when the commit includes changes unrelated to the claimed ticket (the "oh, and I also fixed this" case), always draft a new ticket and immediately close it for the incidental fix — every change has a ticket.
 10. **Slate**: `echo "- done: T-... — ..." >> ~/.TheIgors/claudecode/$(date +%Y%m%d).slate.txt`
 
