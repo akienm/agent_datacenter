@@ -22,6 +22,42 @@ No args: highest-priority pending. `last`: most recently discussed ticket.
 Always sprint from a ticket. When no ticket exists yet, stop here and run
 /ticket first — a sprint without a ticket has no place to report done.
 
+### 1.5. Capability check — would a minion handle this?
+
+Per theigors/rules/capability-protocol (workflow consumer side): before
+claiming, scan the ticket's tags and Affected files against the capability
+surface. If a minion or device on the rack would do the work better than CC
+inline, surface the delegate option as a one-line command **before** the
+claim. The prompt is mandatory; the delegate action is not — Akien decides.
+
+Capability surface to scan:
+- Available MCP tools (deferred tool list — `mcp__igor__*`, `mcp__datacenter__*`,
+  etc.) — names tell you what minions/devices are reachable.
+- `mcp__datacenter__datacenter_manifest` — full per-device capability map
+  if you need detail beyond tool names.
+
+Matching heuristics (when any match, surface the option):
+- Ticket tag includes `Database` → `mcp__igor__db_query` (if it exists)
+- Ticket tag includes `Cognition` / `Debug` → Igor cognition-debug capability
+- Ticket tag includes `Reading` / `Memory` → Igor memory tools
+- Affected files under `wild_igor/igor/` AND ticket scope is "implement
+  inside Igor" → consider Igor self-coding via cc_send
+
+Output shape (one line, before Step 2 — Claim):
+```
+CAPABILITY CHECK: <tag/match> matches <capability> — delegate via:
+  <one-line command>
+Proceed inline anyway? (y to claim CC-side, or fire the delegate)
+```
+
+When no match: silent — proceed to Step 2 directly. The check is
+fast-fail; absence of a match is not a finding worth reporting.
+
+This closes the lapsed practice "all external minions for work other than
+design chat" by making the delegate option visible at the moment it would
+be exercised. **Exempt from theigors/rules/capability-protocol/two-sided-
+build** — pure skill-consumer of an already-shipped capability surface.
+
 ### 2. Claim ticket
 ```bash
 python3 ~/TheIgors/lab/claudecode/cc_queue.py claim <id>

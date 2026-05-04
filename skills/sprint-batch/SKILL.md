@@ -65,6 +65,7 @@ abort?" before the first ticket.
 
 For each ticket in topo-order, run the /sprint body:
 
+0.5. **Capability check (pre-claim)**: scan the ticket's tags and Affected files against the capability surface (available `mcp__*` tools, `mcp__datacenter__datacenter_manifest`). When a minion or device matches (e.g. tag `Database` → `mcp__igor__db_query`, tag `Cognition`/`Debug` → Igor cognition-debug capability, Igor self-coding via `mcp__igor__cc_send` for `wild_igor/igor/` work), surface the delegate option as a one-line command BEFORE claiming. Prompt is mandatory; delegate action is not — Akien decides per-ticket. Silent when no match. Closes the lapsed "all external minions for work other than design chat" practice. Exempt from theigors/rules/capability-protocol/two-sided-build (pure consumer of already-shipped capability surface).
 1. **Claim**: `cc_queue.py claim <id>`
 2. **Review plan**: when the ticket description carries an /audit-ticket approval stamp, skip asking. Otherwise always invoke /audit-precode on the plan before coding.
 3. **Build**: implement the ticket
