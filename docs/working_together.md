@@ -49,6 +49,19 @@ Accept that Claude is a good coder, not always a great one. Plan to periodically
 
 **Have and approve a complete plan before execution.** "I like your plan, go" is a real step. See the whole move before it's made. Each piece of work gets a ticket and belongs to a sprint discussion.
 
+**CC+/CC- causal rework scoring.** When rework happens, name the cause in the moment. Two types:
+
+- `CC+` — design changed; Claude did the job right but the target moved. Not Claude's fault.
+- `CC-` — Claude was incomplete, missed something, or made an assumption it shouldn't have. Claude's gap.
+
+Record one line in today's slate when rework occurs:
+```
+CC- 2026-05-05 14:32: assumed MySQL schema, was LMDB-compatible layer
+CC+ 2026-05-05 15:10: Akien added emotional milieu layer, rework expected
+```
+
+`/context-load` injects the current tally (`CC+ N / CC- N`) at session start so the score is visible when the next decision is made. The signal works at the decision point, not in retrospect. `/fixit` prompts for the classification when it fires — the moment of rework is the moment to name it.
+
 ---
 
 ## The Daily Loop
