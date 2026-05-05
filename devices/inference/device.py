@@ -1,5 +1,5 @@
 """
-InferenceDevice — rack registration for a local or remote inference endpoint.
+InferenceDevice — rack device owning LLM inference dispatch.
 
 Supports two modes:
   openrouter   — proxied LLM inference via openrouter.ai (requires OR API key)
@@ -8,19 +8,26 @@ Supports two modes:
 Mode is set via INFERENCE_MODE env var (default: openrouter).
 Endpoint URL is set via INFERENCE_ENDPOINT env var.
 
-The device does not own the inference connection — it provides health
-reporting and comms:// registration so other devices can dispatch via the bus.
+Primary entry point: dispatch(InferenceRequest) -> InferenceResponse.
+This is a thin HTTP client — no tool-use loops, no budget management, no
+prompt assembly. Callers handle prompt shape; this device handles transport.
+
+Health + comms:// registration are the secondary role (rack-visible contract).
 """
 
 from __future__ import annotations
 
+import json
 import os
 import socket
 import time
+import urllib.error
+import urllib.request
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from agent_datacenter.device import BaseDevice, INTERFACE_VERSION
+from devices.inference.shim import InferenceRequest, InferenceResponse
 
 _START_TIME = time.time()
 _MODE = os.environ.get("INFERENCE_MODE", "openrouter")
@@ -181,3 +188,117 @@ class InferenceDevice(BaseDevice):
     def recovery(self) -> None:
         self._blocked = False
         self._block_reason = ""
+
+    # ── Inference dispatch ────────────────────────────────────────────────────
+
+    def dispatch(self, request: InferenceRequest) -> InferenceResponse:
+        """Send an inference request and return the response.
+
+        Uses the device's configured mode (openrouter or ollama). Raises
+        RuntimeError on API error or if the device is blocked.
+        """
+        if self._blocked:
+            raise RuntimeError(f"InferenceDevice blocked: {self._block_reason}")
+        t0 = time.time()
+        if self._mode == "openrouter":
+            raw = self._or_call(request)
+        else:
+            raw = self._ollama_call(request)
+        elapsed_ms = round((time.time() - t0) * 1000)
+        return _parse_response(raw, elapsed_ms=elapsed_ms)
+
+    def _or_call(self, req: InferenceRequest) -> dict:
+        api_key = os.environ.get("OPENROUTER_API_KEY", "").strip()
+        if not api_key:
+            raise RuntimeError("OPENROUTER_API_KEY not set")
+        messages = (
+            [{"role": "system", "content": req.system}] + req.messages
+            if req.system
+            else req.messages
+        )
+        payload: dict = {
+            "model": req.model,
+            "messages": messages,
+            "max_tokens": req.max_tokens,
+            "temperature": req.temperature,
+        }
+        payload.update(req.extra)
+        body = json.dumps(payload).encode()
+        http_req = urllib.request.Request(
+            "https://openrouter.ai/api/v1/chat/completions",
+            data=body,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://github.com/akienm/TheIgors",
+                "X-Title": "agent-datacenter-inference",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(http_req, timeout=req.timeout) as resp:
+                return json.loads(resp.read())
+        except urllib.error.HTTPError as exc:
+            err_body = exc.read().decode()[:400]
+            raise RuntimeError(f"OpenRouter {exc.code}: {err_body}") from exc
+
+    def _ollama_call(self, req: InferenceRequest) -> dict:
+        base = (self._endpoint or _OLLAMA_DEFAULT).rstrip("/")
+        messages = (
+            [{"role": "system", "content": req.system}] + req.messages
+            if req.system
+            else req.messages
+        )
+        payload = {
+            "model": req.model,
+            "messages": messages,
+            "stream": False,
+            "options": {"temperature": req.temperature, "num_predict": req.max_tokens},
+        }
+        payload.update(req.extra)
+        body = json.dumps(payload).encode()
+        http_req = urllib.request.Request(
+            f"{base}/api/chat",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(http_req, timeout=req.timeout) as resp:
+                return json.loads(resp.read())
+        except urllib.error.HTTPError as exc:
+            err_body = exc.read().decode()[:400]
+            raise RuntimeError(f"Ollama {exc.code}: {err_body}") from exc
+
+
+def _parse_response(raw: dict, elapsed_ms: int = 0) -> InferenceResponse:
+    """Parse an OpenAI-compatible or Ollama response into InferenceResponse."""
+    # OpenAI-compatible (OpenRouter + Ollama /v1/)
+    choices = raw.get("choices")
+    if choices:
+        choice = choices[0]
+        text = (choice.get("message") or {}).get("content") or ""
+        finish_reason = choice.get("finish_reason") or "stop"
+        usage = raw.get("usage") or {}
+        return InferenceResponse(
+            text=text,
+            model=raw.get("model", ""),
+            finish_reason=finish_reason,
+            input_tokens=usage.get("prompt_tokens", 0),
+            output_tokens=usage.get("completion_tokens", 0),
+            elapsed_ms=elapsed_ms,
+            raw=raw,
+        )
+    # Ollama /api/chat native format
+    msg = raw.get("message") or {}
+    text = msg.get("content") or ""
+    done_reason = raw.get("done_reason") or ("stop" if raw.get("done") else "")
+    return InferenceResponse(
+        text=text,
+        model=raw.get("model", ""),
+        finish_reason=done_reason or "stop",
+        input_tokens=raw.get("prompt_eval_count", 0),
+        output_tokens=raw.get("eval_count", 0),
+        elapsed_ms=elapsed_ms,
+        raw=raw,
+    )

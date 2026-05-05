@@ -6,6 +6,10 @@ Ollama mode: manages the ollama serve process.
 
 self_test() checks reachability without launching anything in OpenRouter mode.
 In Ollama mode, self_test() starts a temporary server if needed.
+
+Bus envelope types for callers that dispatch via InferenceDevice.dispatch():
+  InferenceRequest  — what to send
+  InferenceResponse — what you get back
 """
 
 from __future__ import annotations
@@ -15,8 +19,37 @@ import os
 import shutil
 import subprocess
 import time
+from dataclasses import dataclass, field
 
 from agent_datacenter.shim import BaseShim
+
+
+@dataclass
+class InferenceRequest:
+    """Bus envelope for an inference dispatch call."""
+
+    messages: list[dict]
+    model: str = "openai/gpt-4o-mini"
+    max_tokens: int = 4096
+    temperature: float = 0.0
+    system: str = ""
+    timeout: int = 60
+    extra: dict = field(default_factory=dict)
+
+
+@dataclass
+class InferenceResponse:
+    """Bus envelope returned by InferenceDevice.dispatch()."""
+
+    text: str
+    model: str = ""
+    finish_reason: str = "stop"
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cost_estimate: float = 0.0
+    elapsed_ms: int = 0
+    raw: dict = field(default_factory=dict)
+
 
 log = logging.getLogger(__name__)
 
