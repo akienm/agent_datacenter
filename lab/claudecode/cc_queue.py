@@ -7,26 +7,41 @@ metadata.kind='ticket').
 
 Log file:  ~/.TheIgors/cc_channel/log.jsonl
 
+Statuses (what happens next):
+    triage      — needs classification; any agent can triage
+    design      — needs design work before sprinting
+    approval    — plan submitted, awaiting Akien sign-off
+    akien       — requires Akien to take an external action
+    sprint      — ready to claim and work
+    in_progress — claimed, actively in flight
+    hold        — explicitly paused (reason in ticket)
+    dependency  — gated on a future event or condition
+    pending     — waiting on a specific other ticket (list it)
+    cancelled   — decided not to do
+    closed      — done
+
 Usage:
-    cc_queue.py list                          — show tasks (pending first, gated hidden)
+    cc_queue.py list                          — show tasks (sprint first, gated hidden)
     cc_queue.py list --gated                  — include gated tickets in the list
     cc_queue.py list --by-decision            — group output by decision_id
-    cc_queue.py add <json-file>               — add task from JSON file
+    cc_queue.py add <json-file>               — add task from JSON file (defaults to triage)
     cc_queue.py claim <id>                    — mark task in_progress
-    cc_queue.py done <id> <msg>               — mark task completed with result
-    cc_queue.py block <id> <msg>              — mark task blocked with reason
+    cc_queue.py done <id> <msg>               — mark task closed with result
+    cc_queue.py block <id> <msg>              — mark task hold with reason
+    cc_queue.py setstatus <id> <status>       — set any status directly
     cc_queue.py show <id>                     — show full task detail
     cc_queue.py log <msg>                     — append a free-form log entry
     cc_queue.py flush_decision <id> <summary> — flush decision to Igor memory
     cc_queue.py flush_session <session> <summary> — flush session blob to Igor memory
     cc_queue.py worker-launch                     — ensure worker daemon is running (spawns konsole if not)
-    cc_queue.py reset <id>                        — reset one ticket from in_progress → pending (retry after timeout)
-    cc_queue.py reset-stale                       — reset all in_progress tickets → pending (daemon startup cleanup)
+    cc_queue.py reset <id>                        — reset one ticket from in_progress → sprint (retry after timeout)
+    cc_queue.py reset-stale                       — reset all in_progress tickets → sprint (daemon startup cleanup)
     cc_queue.py set-worker <worker> <id> [<id>]  — assign worker (igor|claude) to ticket(s)
-    cc_queue.py needs-review <id>                — mark ticket needs_review (Igor self-coding review gate)
+    cc_queue.py needs-review <id>                — mark ticket triage (review gate)
     cc_queue.py gate <id> <reason>               — gate a ticket behind a precondition (hides from default list)
     cc_queue.py ungate <id> [note]               — clear a ticket's gate
     cc_queue.py set-decision <id> <decision-id>  — attach a decision id to a ticket
+    cc_queue.py migrate-statuses                 — one-time migration: strip title prefixes, map old → new statuses
 """
 
 import json
@@ -52,13 +67,26 @@ def _ssl_ctx() -> ssl.SSLContext:
 LOG_PATH = os.path.expanduser("~/.TheIgors/cc_channel/log.jsonl")
 CLOSED_TICKETS_PATH = os.path.expanduser("~/.TheIgors/claudecode/closed_tickets.txt")
 STATUS_ORDER = {
-    "pending": 0,
-    "in_progress": 1,
-    "needs_review": 2,
-    "awaiting_approval": 3,
-    "blocked": 4,
-    "done": 5,
+    # Canonical statuses (what happens next):
+    "triage": 0,
+    "design": 1,
+    "approval": 2,
+    "akien": 3,
+    "sprint": 4,
+    "in_progress": 5,
+    "hold": 6,
+    "dependency": 7,
+    "pending": 8,
+    "cancelled": 9,
+    "closed": 10,
+    # Legacy aliases (kept for old DB rows):
+    "needs_review": 0,
+    "awaiting_approval": 2,
+    "blocked": 6,
+    "done": 10,
 }
+
+_TERMINAL_STATUSES = {"closed", "done", "cancelled"}
 
 
 def _db_conn():
@@ -184,8 +212,18 @@ def _find(tasks, tid):
 
 def _format_task_line(t: dict) -> str:
     STATUS_ICON = {
-        "pending": "⬜",
+        "triage": "🔍",
+        "design": "📐",
+        "approval": "🟠",
+        "akien": "👤",
+        "sprint": "⬜",
         "in_progress": "🔵",
+        "hold": "⏸",
+        "dependency": "🔗",
+        "pending": "⏳",
+        "cancelled": "❌",
+        "closed": "✅",
+        # Legacy:
         "needs_review": "🟡",
         "awaiting_approval": "🟠",
         "blocked": "🔴",
@@ -201,9 +239,9 @@ def _format_task_line(t: dict) -> str:
 
 def _print_task(t: dict) -> None:
     print(_format_task_line(t))
-    if t["status"] == "blocked" and t.get("result"):
-        print(f"       BLOCKED: {t['result']}")
-    if t["status"] == "done" and t.get("result"):
+    if t["status"] in ("blocked", "hold") and t.get("result"):
+        print(f"       HOLD: {t['result']}")
+    if t["status"] in ("done", "closed") and t.get("result"):
         print(f"       done: {t['result']}")
 
 
@@ -287,7 +325,9 @@ def cmd_claim(args):
     if not t:
         print(f"Task {args[0]} not found.")
         sys.exit(1)
-    if t["status"] != "pending" or (t.get("worker") and t.get("worker") != as_worker):
+    if t["status"] not in ("pending", "sprint") or (
+        t.get("worker") and t.get("worker") != as_worker
+    ):
         print(
             f"Task {args[0]} is {t['status']} or worker mismatch "
             f"(ticket worker={t.get('worker')!r}, claiming as={as_worker!r})."
@@ -475,7 +515,7 @@ def _ungate_dependents(tasks: list, closed_id: str) -> int:
     """
     ungated = 0
     for t in tasks:
-        if t.get("status") != "pending":
+        if t.get("status") in _TERMINAL_STATUSES:
             continue
         gate = t.get("gate") or ""
         if not gate:
@@ -504,7 +544,7 @@ def cmd_done(args):
     if not t:
         print(f"Task {args[0]} not found.")
         sys.exit(1)
-    t["status"] = "done"
+    t["status"] = "closed"
     t["result"] = args[1]
     t["completed_at"] = _now()
     decision_id = t.get("decision_id")
@@ -527,17 +567,17 @@ def cmd_block(args):
     if not t:
         print(f"Task {args[0]} not found.")
         sys.exit(1)
-    t["status"] = "blocked"
+    t["status"] = "hold"
     t["result"] = args[1]
     t["blocked_at"] = _now()
     _save(tasks)
-    _log({"action": "blocked", "id": args[0], "title": t["title"], "reason": args[1]})
+    _log({"action": "hold", "id": args[0], "title": t["title"], "reason": args[1]})
     _close_igor_goal(args[0])
-    print(f"Blocked {args[0]}: {args[1]}")
+    print(f"Hold {args[0]}: {args[1]}")
 
 
 def cmd_propose(args):
-    """D331: Igor proposes a design change for approval. Sets status=awaiting_approval."""
+    """D331: Igor proposes a design change for approval. Sets status=approval."""
     if len(args) < 2:
         print("Usage: propose <id> <proposal text>")
         sys.exit(1)
@@ -547,7 +587,7 @@ def cmd_propose(args):
         print(f"Task {args[0]} not found.")
         sys.exit(1)
     proposal = " ".join(args[1:])
-    t["status"] = "awaiting_approval"
+    t["status"] = "approval"
     t["proposal"] = proposal
     t["proposed_at"] = _now()
     _save(tasks)
@@ -560,11 +600,11 @@ def cmd_propose(args):
         }
     )
     print(f"Proposed {args[0]}: {proposal[:120]}")
-    print(f"Status: awaiting_approval — CC will review on next context-load")
+    print(f"Status: approval — CC will review on next context-load")
 
 
 def cmd_approve(args):
-    """D331: Approve a pending proposal. Resets ticket to pending with approved plan."""
+    """D331: Approve a pending proposal. Resets ticket to sprint with approved plan."""
     if not args:
         print("Usage: approve <id> [approval notes]")
         sys.exit(1)
@@ -573,11 +613,11 @@ def cmd_approve(args):
     if not t:
         print(f"Task {args[0]} not found.")
         sys.exit(1)
-    if t["status"] != "awaiting_approval":
-        print(f"Task {args[0]} is {t['status']}, not awaiting_approval.")
+    if t["status"] not in ("approval", "awaiting_approval"):
+        print(f"Task {args[0]} is {t['status']}, not approval.")
         sys.exit(1)
     notes = " ".join(args[1:]) if len(args) > 1 else ""
-    t["status"] = "pending"
+    t["status"] = "sprint"
     t["approved_plan"] = t.get("proposal", "")
     t["approval_notes"] = notes
     t["approved_at"] = _now()
@@ -689,7 +729,7 @@ def cmd_add(args):
         if nt["id"] in existing_ids:
             print(f"  skip (exists): {nt['id']}")
             continue
-        nt.setdefault("status", "pending")
+        nt.setdefault("status", "triage")
         # D-worker-mode-routing-2026-04-21: auto-default by metadata if unset
         if "worker" not in nt or nt.get("worker") in (None, ""):
             nt["worker"] = _infer_worker(nt)
@@ -848,7 +888,7 @@ def cmd_worker_launch(args):
 
 
 def cmd_reset(args):
-    """Reset a single ticket back to pending (e.g., after a timeout)."""
+    """Reset a single ticket back to sprint (e.g., after a timeout)."""
     if not args:
         print("Usage: reset <id>")
         sys.exit(1)
@@ -858,24 +898,22 @@ def cmd_reset(args):
         print(f"Task {args[0]} not found.")
         sys.exit(1)
     prev = t["status"]
-    t["status"] = "pending"
+    t["status"] = "sprint"
     t["claimed_at"] = None
-    t["blocked_at"] = (
-        None  # Clear block so adopt_top_queue_ticket will pick it up again
-    )
+    t["blocked_at"] = None
     _save(tasks)
     _log({"action": "reset", "id": args[0], "prev_status": prev})
-    print(f"Reset {args[0]}: {prev} → pending (blocked_at cleared)")
+    print(f"Reset {args[0]}: {prev} → sprint (blocked_at cleared)")
 
 
 def cmd_reset_stale(args):
-    """Reset all in_progress tickets back to pending (used at daemon startup to clean orphans)."""
+    """Reset all in_progress tickets back to sprint (used at daemon startup to clean orphans)."""
     tasks = _load()
     reset_count = 0
     for t in tasks:
         if t["status"] == "in_progress":
             prev = t["status"]
-            t["status"] = "pending"
+            t["status"] = "sprint"
             t["claimed_at"] = None
             _log({"action": "reset_stale", "id": t["id"], "prev_status": prev})
             print(f"  reset stale: {t['id']}")
@@ -883,6 +921,95 @@ def cmd_reset_stale(args):
     if reset_count:
         _save(tasks)
     print(f"Reset {reset_count} stale in_progress ticket(s).")
+
+
+_VALID_STATUSES = set(STATUS_ORDER.keys())
+
+
+def cmd_setstatus(args):
+    """Set any status directly: setstatus <id> <status>"""
+    if len(args) < 2:
+        print("Usage: setstatus <ticket-id> <status>")
+        print(f"Valid: {', '.join(sorted(_VALID_STATUSES))}")
+        sys.exit(1)
+    tid, new_status = args[0], args[1]
+    if new_status not in _VALID_STATUSES:
+        print(
+            f"Unknown status {new_status!r}. Valid: {', '.join(sorted(_VALID_STATUSES))}"
+        )
+        sys.exit(1)
+    tasks = _load()
+    t = _find(tasks, tid)
+    if not t:
+        print(f"Task {tid} not found.")
+        sys.exit(1)
+    old_status = t["status"]
+    t["status"] = new_status
+    _save(tasks)
+    _log({"action": "setstatus", "id": tid, "old": old_status, "new": new_status})
+    print(f"{tid}: {old_status} → {new_status}")
+
+
+# Title prefix → canonical status mapping for migrate-statuses
+_PREFIX_STATUS = {
+    "DESIGNED:": "sprint",
+    "NEEDS DESIGN:": "design",
+    "NEW:": "triage",
+    "CLOSED:": "hold",
+}
+
+# Per-ticket status overrides (id → status) for migrate-statuses
+_ID_STATUS_OVERRIDE = {
+    "T-uc-cert-domain-migration": "akien",
+}
+
+
+def cmd_migrate_statuses(args):
+    """One-time migration: strip title prefixes, map old statuses to new canonical values."""
+    tasks = _load()
+    changed = 0
+    for t in tasks:
+        if t.get("status") in _TERMINAL_STATUSES:
+            continue
+        old_title = t.get("title", "")
+        old_status = t.get("status", "")
+        new_title = old_title
+        new_status = old_status
+
+        # Strip known prefixes and derive status from them
+        for prefix, derived_status in _PREFIX_STATUS.items():
+            if old_title.startswith(prefix):
+                new_title = old_title[len(prefix) :].strip()
+                # Only apply prefix-derived status if status is still "pending"
+                if old_status == "pending":
+                    new_status = derived_status
+                break
+
+        # Map legacy statuses to new canonical names
+        legacy_map = {
+            "blocked": "hold",
+            "awaiting_approval": "approval",
+            "needs_review": "triage",
+        }
+        if new_status in legacy_map:
+            new_status = legacy_map[new_status]
+
+        # Per-ticket overrides
+        if t["id"] in _ID_STATUS_OVERRIDE:
+            new_status = _ID_STATUS_OVERRIDE[t["id"]]
+
+        if new_title != old_title or new_status != old_status:
+            print(f"  {t['id']}: [{old_status}] {old_title!r}")
+            print(f"    → [{new_status}] {new_title!r}")
+            t["title"] = new_title
+            t["status"] = new_status
+            changed += 1
+
+    if changed:
+        _save(tasks)
+        print(f"\nMigrated {changed} ticket(s).")
+    else:
+        print("Nothing to migrate.")
 
 
 COMMANDS = {
@@ -901,6 +1028,8 @@ COMMANDS = {
     "notify-igor": cmd_notify_igor,
     "reset": cmd_reset,
     "reset-stale": cmd_reset_stale,
+    "setstatus": cmd_setstatus,
+    "migrate-statuses": cmd_migrate_statuses,
 }
 
 
