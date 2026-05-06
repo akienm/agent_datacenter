@@ -22,6 +22,8 @@ from devices.igor.shim import IgorShim
 from devices.inference.device import InferenceDevice
 from devices.inference.shim import InferenceShim
 from devices.postgres.device import PostgresDevice
+from devices.rack_test.device import RackTestDevice
+from devices.rack_test.shim import RackTestShim
 from devices.swadl.device import SwadlDevice
 from devices.swadl.shim import SwadlShim
 from devices.template.device import TemplateDevice
@@ -39,6 +41,7 @@ ALL_DEVICE_CLASSES = [
     ClaudeDevice,
     DiscordBotDevice,
     SwadlDevice,
+    RackTestDevice,
 ]
 
 ALL_SHIM_CLASSES = [
@@ -50,6 +53,7 @@ ALL_SHIM_CLASSES = [
     ClaudeShim,
     DiscordBotShim,
     SwadlShim,
+    RackTestShim,
 ]
 
 
