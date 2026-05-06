@@ -73,13 +73,13 @@ cat ~/.TheIgors/claudecode/<closing-day>.slate.txt
 
 Always sync pending tickets to GitHub so Akien has the cloud backup:
 ```bash
-python3 ~/TheIgors/lab/claudecode/github_sync.py push-queue
+python3 ${CC_WORKFLOW_TOOLS}/github_sync.py push-queue
 ```
 
 ### 8. Sync docs DB
 ```bash
 DB=postgresql://igor:choose_a_password@127.0.0.1/Igor-wild-0001
-IGOR_HOME_DB_URL=$DB python3 ~/TheIgors/lab/claudecode/docs_sync.py sync
+IGOR_HOME_DB_URL=$DB python3 ${CC_WORKFLOW_TOOLS}/docs_sync.py sync
 ```
 
 ### 9. Update affected DSBs

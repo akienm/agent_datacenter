@@ -91,7 +91,7 @@ Akien's pre-approval. Stamp the approval into the ticket body before filing
 Write the post-review batch to `/tmp/decided_batch_<decision-id>.json`, then
 append to the queue:
 ```bash
-python3 ~/TheIgors/lab/claudecode/cc_queue.py add /tmp/decided_batch_<decision-id>.json
+python3 ${CC_WORKFLOW_TOOLS}/cc_queue.py add /tmp/decided_batch_<decision-id>.json
 ```
 `cc_queue.py` is the canonical writer — always go through it so the slate
 echo and session record stay consistent.

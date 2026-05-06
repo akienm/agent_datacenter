@@ -27,7 +27,7 @@ If tests fail: **STOP**. Fix before proceeding. Offer to run `/test-fix`.
 ## Step 2 — File placement
 
 ```bash
-python3 ~/TheIgors/lab/claudecode/validate_files.py 2>/dev/null | head -30
+python3 ${CC_WORKFLOW_TOOLS}/validate_files.py 2>/dev/null | head -30
 ```
 
 Note any misplaced files. Small fixes now; large restructures → ticket.

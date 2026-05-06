@@ -8,7 +8,7 @@ model: haiku
 
 ## Step 0.25 — Stale slate check (soft prompt to close previous day)
 ```bash
-python3 ~/TheIgors/lab/claudecode/stale_slate_check.py
+python3 ${CC_WORKFLOW_TOOLS}/stale_slate_check.py
 ```
 
 Soft prompt — when the most-recent prior-day slate has open items in
@@ -124,12 +124,12 @@ mcp__igor__channel_read(limit=5)
 ```
 Fallback (shared Postgres channel, all machines):
 ```bash
-python3 ~/TheIgors/lab/claudecode/channel.py read 5
+python3 ${CC_WORKFLOW_TOOLS}/channel.py read 5
 ```
 
 ## Step 5 — Pending approvals
 ```bash
-python3 ~/TheIgors/lab/claudecode/cc_queue.py list 2>/dev/null | grep "🟠"
+python3 ${CC_WORKFLOW_TOOLS}/cc_queue.py list 2>/dev/null | grep "🟠"
 ```
 
 ## Step 5.6 — Unread CC inbox

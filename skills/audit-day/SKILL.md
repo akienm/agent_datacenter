@@ -125,7 +125,7 @@ Dead `code_ref` habits → update or remove. More than 5 = HIGH.
 
 When Step 2 found partial call-graph updates, draft a ticket:
 ```bash
-python3 ~/TheIgors/lab/claudecode/scan_for_rest_drafter.py \
+python3 ${CC_WORKFLOW_TOOLS}/scan_for_rest_drafter.py \
   --function <func_name> \
   --found-callers <file1,file2> \
   --missing-callers <file3,file4> \

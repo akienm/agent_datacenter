@@ -119,7 +119,7 @@ Target length: ~600-900 tokens. Dense, no padding.
 
 Post summary to channel:
 ```bash
-python3 ~/TheIgors/lab/claudecode/channel.py post "deep-audit complete — <N> findings, top issue: <one line>" --as claude-code
+python3 ${CC_WORKFLOW_TOOLS}/channel.py post "deep-audit complete — <N> findings, top issue: <one line>" --as claude-code
 ```
 
 Append to slate:
@@ -129,7 +129,7 @@ echo "- done: deep-audit — <one line summary of top finding>" >> ~/.TheIgors/c
 
 Close ticket:
 ```bash
-python3 ~/TheIgors/lab/claudecode/cc_queue.py done T-deep-audit-parallel "<one paragraph summary of findings>"
+python3 ${CC_WORKFLOW_TOOLS}/cc_queue.py done T-deep-audit-parallel "<one paragraph summary of findings>"
 ```
 
 ---

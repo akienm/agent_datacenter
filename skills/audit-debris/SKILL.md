@@ -62,7 +62,7 @@ Live rows in `test_*` schemas = AMEND (conftest teardown missed them).
 
 ### 7. File placement
 ```bash
-python3 ~/TheIgors/lab/claudecode/validate_files.py 2>/dev/null | head -20
+python3 ${CC_WORKFLOW_TOOLS}/validate_files.py 2>/dev/null | head -20
 ```
 Any misplaced file = AMEND. Code under `wild_igor/`, runtime under `~/.TheIgors/`.
 

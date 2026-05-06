@@ -18,7 +18,7 @@ All execution logic lives in /sprint-ticket.
 
 ### 1. Select ticket
 ```bash
-python3 ~/TheIgors/lab/claudecode/cc_queue.py list 2>/dev/null | grep "⚪\|🟡"
+python3 ${CC_WORKFLOW_TOOLS}/cc_queue.py list 2>/dev/null | grep "⚪\|🟡"
 ```
 No args: highest-priority pending. `last`: most recently discussed ticket.
 

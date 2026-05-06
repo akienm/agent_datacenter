@@ -15,7 +15,7 @@ per-ticket state recording; /autocompact signals "done working for now."
 
 Preferred (DESIGNED:T-mcp-igor-cognition-debug-capability):
 ```bash
-python3 ~/TheIgors/lab/claudecode/debug_session_cli.py release
+python3 ${CC_WORKFLOW_TOOLS}/debug_session_cli.py release
 ```
 
 Fallback:

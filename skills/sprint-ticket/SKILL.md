@@ -44,7 +44,7 @@ When no match: silent — proceed to Step 2 directly.
 
 ### 2. Claim ticket
 ```bash
-python3 ~/TheIgors/lab/claudecode/cc_queue.py claim <id>
+python3 ${CC_WORKFLOW_TOOLS}/cc_queue.py claim <id>
 ```
 Always claim before working — the claim marks the ticket in-progress so the
 queue and slate reflect active work. Then add the ticket ID to today's slate
@@ -75,7 +75,7 @@ After the inertia check, surface a one-screen infrastructure brief for the
 touched areas (MCP tools, proxies, base classes, IMAP buses, channels).
 
 ```bash
-python3 ~/TheIgors/lab/claudecode/sprint_infrastructure_brief.py \
+python3 ${CC_WORKFLOW_TOOLS}/sprint_infrastructure_brief.py \
   <file1> <file2> ...
 ```
 
@@ -148,8 +148,8 @@ Always let pre-commit hooks run. Push non-force to main.
 
 Always close with a one-line summary of what actually shipped:
 ```bash
-python3 ~/TheIgors/lab/claudecode/cc_queue.py done <id> "what was built"
-python3 ~/TheIgors/lab/claudecode/cc_queue.py retitle <id> "CLOSED: <bare-title>"
+python3 ${CC_WORKFLOW_TOOLS}/cc_queue.py done <id> "what was built"
+python3 ${CC_WORKFLOW_TOOLS}/cc_queue.py retitle <id> "CLOSED: <bare-title>"
 echo "- done: <id> — <summary>" >> ~/.TheIgors/claudecode/$(date +%Y%m%d).slate.txt
 ```
 

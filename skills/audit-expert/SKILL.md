@@ -61,8 +61,8 @@ Candidate ticket (0-1):
 # Recent commits
 git log --oneline --since="7 days ago"
 # Today's stats
-python3 ~/TheIgors/lab/claudecode/map_igor.py --section=tickets
-python3 ~/TheIgors/lab/claudecode/map_igor.py --section=gates
+python3 ${CC_WORKFLOW_TOOLS}/map_igor.py --section=tickets
+python3 ${CC_WORKFLOW_TOOLS}/map_igor.py --section=gates
 # Prior watch-for notes for expert level
 python3 -c "
 from lab.claudecode.audit_telemetry import read_watch_next
