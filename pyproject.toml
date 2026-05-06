@@ -11,7 +11,7 @@ dependencies = ["click>=8.0"]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["agent_datacenter*", "bus*", "skeleton*", "devices*", "config*"]
+include = ["agent_datacenter*", "bus*", "skeleton*", "devices*", "config*", "lab*"]
 
 [project.scripts]
 agentctl = "agent_datacenter.rack:main"
