@@ -282,6 +282,35 @@ def _bootstrap_mkcert() -> tuple[str, str] | None:
     return (str(cert_path), str(key_path))
 
 
+def _deliver_to_tmux(content: str, sender: str, channel: str) -> None:
+    """Forward a message to agent tmux sessions matching the channel. Never raises."""
+    try:
+        from devices.claude.tmux_face import send_to_session
+    except ImportError:
+        return
+
+    with _agents_lock:
+        agents_snapshot = dict(_agents)
+
+    targets: list[tuple[str, str]] = []  # (tmux_target, agent_id)
+    if channel.startswith("comms://"):
+        ch_name = channel[len("comms://") :]
+        if ch_name == "shared":
+            for agent_id, info in agents_snapshot.items():
+                if info.get("tmux_target"):
+                    targets.append((info["tmux_target"], agent_id))
+        elif ch_name in agents_snapshot and agents_snapshot[ch_name].get("tmux_target"):
+            targets.append((agents_snapshot[ch_name]["tmux_target"], ch_name))
+
+    for tmux_target, agent_id in targets:
+        try:
+            send_to_session(target=tmux_target, sender=sender, message=content)
+        except Exception as exc:
+            log.warning(
+                "tmux_deliver: agent=%s target=%s: %s", agent_id, tmux_target, exc
+            )
+
+
 def _channel_append(author: str, content: str, msg_type: str = "message"):
     """Mirror a message to the shared JSONL channel and Postgres. Never raises."""
     try:
@@ -678,11 +707,13 @@ async def _api_agent_register(request: Request):
         return JSONResponse({"error": "agent_id required"}, status_code=400)
     capabilities = body.get("capabilities", [])
     callback_url = body.get("callback_url", "")
+    tmux_target = body.get("tmux_target", "").strip()[:128]
     with _agents_lock:
         _agents[agent_id] = {
             "registered_at": _ts(),
             "capabilities": capabilities,
             "callback_url": callback_url,
+            "tmux_target": tmux_target,
             "last_heartbeat": time.monotonic(),
         }
     log.info("Agent registered: %s (capabilities: %s)", agent_id, capabilities)
@@ -909,6 +940,7 @@ async def _ws_endpoint(ws: WebSocket):
                         _add_to_history(current_session, umsg)
                         _broadcast_to_session(current_session, json.dumps(umsg))
                         _channel_append(author, content)
+                        _deliver_to_tmux(content, author, current_session)
         except Exception as e:
             log.debug("ws receive error: %s", e)
 
