@@ -1,78 +1,63 @@
 """
-DiscordBotShim — lifecycle proxy for the Discord bot embedded in Igor.
+DiscordBotShim — lifecycle proxy for the Discord bot (Phase 5).
 
-Phase 4: bot runs as a thread inside Igor's process. start()/stop() are
-no-ops — lifecycle is owned by IgorShim. self_test() verifies preconditions.
-
-Phase 5 (T-adc-network-discord-relocate): once bot code moves into
-agent_datacenter, this shim will own a standalone discord.py Client.
+Phase 5: bot runs as a daemon thread in bot.py; this shim owns start/stop.
 """
 
 from __future__ import annotations
 
 import logging
 import os
-import time
 
 from agent_datacenter.shim import BaseShim
 
-log = logging.getLogger(__name__)
+from .device import DiscordBotDevice
+from . import bot as _bot
 
-_DEFAULT_LOG = os.path.expanduser(
-    os.environ.get("DISCORD_LOG_PATH", "~/.TheIgors/local/logs/discord.log")
-)
-_LOG_RECENCY_LIMIT = 300  # 5 min
+log = logging.getLogger(__name__)
 
 
 class DiscordBotShim(BaseShim):
-    """
-    Lifecycle proxy for the Discord bot (Phase 4: embedded-in-Igor mode).
+    DEVICE_ID = "discord-bot"
 
-    start() and stop() delegate to IgorShim semantics — the bot starts
-    and stops with Igor, not independently.
-    """
-
-    def __init__(self, log_path: str = _DEFAULT_LOG) -> None:
-        self._log_path = log_path
+    def __init__(self) -> None:
+        self._device = DiscordBotDevice()
 
     @property
     def device_id(self) -> str:
-        return "discord-bot"
+        return self.DEVICE_ID
+
+    @property
+    def device(self) -> DiscordBotDevice:
+        return self._device
 
     def start(self) -> bool:
-        log.info("DiscordBotShim.start(): no-op (bot starts with Igor)")
-        return True
+        try:
+            self._device.start()
+            return _bot.is_running() or not os.environ.get("DISCORD_BOT_TOKEN")
+        except Exception:
+            log.exception("DiscordBotShim.start() failed")
+            return False
 
     def stop(self) -> bool:
-        log.info("DiscordBotShim.stop(): no-op (bot stops with Igor)")
-        return True
+        try:
+            self._device.stop()
+            return True
+        except Exception:
+            log.exception("DiscordBotShim.stop() failed")
+            return False
 
     def restart(self) -> bool:
-        return self.stop() and self.start()
+        self.stop()
+        return self.start()
 
     def self_test(self) -> dict:
         token = os.environ.get("DISCORD_BOT_TOKEN", "")
         if not token:
-            return {
-                "passed": False,
-                "details": "DISCORD_BOT_TOKEN not set in environment",
-            }
-        try:
-            age = time.time() - os.path.getmtime(self._log_path)
-            if age > _LOG_RECENCY_LIMIT:
-                return {
-                    "passed": False,
-                    "details": f"discord.log stale ({age:.0f}s since last write) — bot may be down",
-                }
-            return {
-                "passed": True,
-                "details": f"token set, discord.log fresh ({age:.0f}s ago)",
-            }
-        except OSError:
-            return {
-                "passed": False,
-                "details": f"discord.log not found at {self._log_path}",
-            }
+            return {"passed": False, "details": "DISCORD_BOT_TOKEN not set"}
+        if not _bot.is_running():
+            return {"passed": False, "details": "bot thread not running"}
+        return {"passed": True, "details": "token set, bot thread alive"}
 
     def rollback(self) -> None:
-        log.info("DiscordBotShim.rollback(): no-op")
+        self._device.stop()
