@@ -18,7 +18,9 @@ Callers:
 from __future__ import annotations
 
 import logging
+import logging.handlers
 import os
+import threading
 import time
 from collections import deque
 from pathlib import Path
@@ -28,6 +30,33 @@ log = logging.getLogger(__name__)
 
 _SLOW_MS = int(os.getenv("IGOR_DB_SLOW_MS", "50"))
 _RING_SIZE = 500
+
+# Lazy-init guard for the slow_queries.log file handler.
+_slow_handler_lock = threading.Lock()
+_slow_handler_installed = False
+
+
+def _ensure_slow_query_handler() -> None:
+    """Attach a RotatingFileHandler for slow_queries.log on first slow query."""
+    global _slow_handler_installed
+    if _slow_handler_installed:
+        return
+    with _slow_handler_lock:
+        if _slow_handler_installed:
+            return
+        try:
+            slow_path = _get_db_log_path().parent / "slow_queries.log"
+            slow_path.parent.mkdir(parents=True, exist_ok=True)
+            h = logging.handlers.RotatingFileHandler(
+                slow_path, maxBytes=10 * 1024 * 1024, backupCount=1, encoding="utf-8"
+            )
+            h.setLevel(logging.WARNING)
+            h.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+            log.addHandler(h)
+            _slow_handler_installed = True
+        except Exception as e:
+            log.warning("could not set up slow_queries.log handler: %s", e)
+
 
 # D200: memory column list owned here — cortex imports this constant so SQL
 # construction stays in the data layer. Excludes the embedding blob.
@@ -274,6 +303,7 @@ class PGDatabaseProxy:
                     if last_sql
                     else "(unknown)"
                 )
+                _ensure_slow_query_handler()
                 log.warning("slow query %dms — %s", elapsed_ms, sql_snippet)
                 _db_log(elapsed_ms, sql_snippet, owner=type(self).__name__)
             except Exception as e:
