@@ -46,7 +46,19 @@ of day-close idempotent.
 Always update `~/.TheIgors/claudecode/<closing-day>.slate.txt` (typically
 yesterday's file when day-close runs after midnight):
 - Final status for each ticket: new, unchanged, done, closed, deferred
+- Reorder sections so the closed slate is optimized for future CC reading
 - Mark the slate closed (add the `✅ CLOSED` marker at the bottom so the stale-slate check in /context-load recognizes it)
+
+**Section order at close-time** (Done first — answers "what shipped?" immediately):
+1. `## Done today` — everything that closed, with commit hashes
+2. `## Notes` — short-term reminders still relevant
+3. Session-close summary blocks (`## Session close: ...` with Done/Next lines)
+4. `## In-flight` — what was mid-work at close
+5. `## Ad hoc` — reactive additions during the day
+6. `## Planned` — what was planned but not finished
+7. `✅ CLOSED` — terminator marker
+
+Sections with no content (empty `## Planned`, empty `## Ad hoc`) can be omitted at close time — they add noise without signal. The `## Done today` and `✅ CLOSED` sections are always present.
 
 ### 4. Day-close audit (MANDATORY)
 
@@ -94,8 +106,8 @@ master thread:
 ```bash
 gh api graphql -f query='mutation {
   createDiscussion(input: {
-    repositoryId: "R_kgDORR89gw",
-    categoryId: "DIC_kwDORR89g84C3wqk",
+    repositoryId: "R_kgDOSOSpkA",
+    categoryId: "DIC_kwDOSOSpkM4C8i8p",
     title: "Day YYYY-MM-DD — <theme>",
     body: "## Done\n- ...\n\n## Tickets\n- ...\n\n## Next\n- ..."
   }) { discussion { number url } }
