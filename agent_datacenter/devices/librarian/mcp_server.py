@@ -1,6 +1,6 @@
-"""Librarian MCP server — stdio transport, skeleton phase.
+"""Librarian MCP server — stdio transport, JSON-RPC 2.0.
 
-Phase 1: lists zero tools. Phase 2 adds tool inventory once T-librarian-mcp-tools lands.
+Phase 2: full tool inventory ported from igor_mcp.py.
 
 Usage (stdio mode, for Claude Code MCP config):
     python -m agent_datacenter.devices.librarian.mcp_server
@@ -36,16 +36,37 @@ def _dispatch(msg: dict) -> dict | None:
             "id": msg_id,
             "result": {
                 "protocolVersion": "2024-11-05",
-                "serverInfo": {"name": "librarian", "version": "0.1.0"},
+                "serverInfo": {"name": "librarian", "version": "0.2.0"},
                 "capabilities": {"tools": {}},
             },
         }
 
     if method == "tools/list":
+        from agent_datacenter.devices.librarian import tools as _tools
+
         return {
             "jsonrpc": "2.0",
             "id": msg_id,
-            "result": {"tools": []},  # phase 2 populates this
+            "result": {"tools": _tools.SCHEMAS},
+        }
+
+    if method == "tools/call":
+        from agent_datacenter.devices.librarian import tools as _tools
+
+        params = msg.get("params", {})
+        name = params.get("name", "")
+        args = params.get("arguments", {})
+        try:
+            result = _tools.dispatch(name, args)
+        except Exception as exc:
+            result = f"ERROR: {exc}"
+        return {
+            "jsonrpc": "2.0",
+            "id": msg_id,
+            "result": {
+                "content": [{"type": "text", "text": str(result)}],
+                "isError": str(result).startswith("ERROR"),
+            },
         }
 
     if method == "notifications/initialized":

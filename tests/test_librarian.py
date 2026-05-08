@@ -121,10 +121,13 @@ class TestMcpServer:
         assert resp["result"]["serverInfo"]["name"] == "librarian"
         assert "protocolVersion" in resp["result"]
 
-    def test_tools_list_returns_empty(self):
+    def test_tools_list_returns_schemas(self):
+        from agent_datacenter.devices.librarian.tools import SCHEMAS
+
         msg = {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}
         resp = _dispatch(msg)
-        assert resp["result"]["tools"] == []
+        assert resp["result"]["tools"] == SCHEMAS
+        assert len(resp["result"]["tools"]) > 0
 
     def test_unknown_method_returns_error(self):
         msg = {"jsonrpc": "2.0", "id": 3, "method": "unknown/method"}
