@@ -9,9 +9,24 @@ devices can include extra fields without breaking the rack. The rigid keywords a
 documented per method; extra keys are allowed.
 """
 
+from __future__ import annotations
+
+import logging
+import threading
 from abc import ABC, abstractmethod
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from diagnostic_base.perf import Stopwatch
+
+if TYPE_CHECKING:
+    from bus.imap_server import IMAPServer
+
+log = logging.getLogger(__name__)
 
 INTERFACE_VERSION = "1.0"
+_DEFAULT_LOG_ROOT = Path("datacenter_logs")
 
 
 class BaseDevice(ABC):
@@ -95,3 +110,75 @@ class BaseDevice(ABC):
     @abstractmethod
     def recovery(self) -> None:
         """Attempt recovery from a degraded/unhealthy state."""
+
+    # ── Concrete helpers (not part of the abstract contract) ─────────────────
+
+    def stopwatch(
+        self,
+        stopwatch_id: str,
+        *,
+        comment: str = "",
+        log_root: Path | None = None,
+    ) -> Stopwatch:
+        """Return a Stopwatch bound to this device's identity.
+
+        Usage:
+            with self.stopwatch("fetch_messages") as t:
+                messages = self._imap.fetch_unseen(mailbox)
+        """
+        device_id = self.who_am_i().get("device_id", type(self).__name__.lower())
+        return Stopwatch(
+            stopwatch_id,
+            device_id=device_id,
+            class_name=type(self).__name__,
+            comment=comment,
+            log_root=log_root or _DEFAULT_LOG_ROOT,
+        )
+
+    def start_heartbeat(
+        self,
+        imap_server: "IMAPServer",
+        interval_s: float = 30.0,
+        *,
+        stop: threading.Event | None = None,
+    ) -> threading.Thread:
+        """Start a background thread that publishes heartbeat envelopes.
+
+        Publishes to comms://heartbeat every interval_s seconds. The thread is
+        daemon — it stops automatically when the process exits. Pass a stop
+        threading.Event to halt it cleanly.
+
+        Returns the started thread so callers can join it on shutdown.
+        """
+        _stop = stop or threading.Event()
+
+        def _beat() -> None:
+            from bus.envelope import Envelope
+            from agent_datacenter.bus.router import Router
+
+            router = Router(imap_server)
+            device_id = self.who_am_i().get("device_id", "unknown")
+            log.info("heartbeat: starting for %s (interval=%ss)", device_id, interval_s)
+            while not _stop.is_set():
+                try:
+                    env = Envelope.now(
+                        from_device=device_id,
+                        to_device="heartbeat",
+                        payload={
+                            "device_id": device_id,
+                            "ts": datetime.now(timezone.utc).isoformat(),
+                            "uptime_s": self.uptime(),
+                            "health": self.health().get("status", "unknown"),
+                        },
+                    )
+                    router.send("comms://heartbeat", env)
+                except Exception as exc:
+                    log.debug("heartbeat send failed (non-fatal): %s", exc)
+                _stop.wait(interval_s)
+            log.info("heartbeat: stopped for %s", device_id)
+
+        t = threading.Thread(
+            target=_beat, daemon=True, name=f"heartbeat-{type(self).__name__}"
+        )
+        t.start()
+        return t
