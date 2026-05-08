@@ -66,6 +66,38 @@ SCHEMAS = [
             "required": ["content"],
         },
     },
+    {
+        "name": "cc_send",
+        "description": (
+            "DEPRECATED: use channel_send instead. "
+            "Sends to the 'shared' channel. Kept as alias for backward compatibility."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "content": {"type": "string", "description": "Message to send to Igor"},
+            },
+            "required": ["content"],
+        },
+    },
+    {
+        "name": "request_compaction",
+        "description": (
+            "Queue a /compact of the CC session. Writes the preserve string to "
+            "~/.TheIgors/cc_compact_pending.txt; the UserPromptSubmit hook fires "
+            "it on the next turn. Called by /savestate to trigger compaction."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "preserve_instructions": {
+                    "type": "string",
+                    "description": "Preserve string to pass to /compact.",
+                },
+            },
+            "required": [],
+        },
+    },
 ]
 
 
@@ -132,6 +164,19 @@ def channel_send(
         return f"channel_send failed: {e}"
 
 
+def _request_compaction(preserve_instructions: str) -> str:
+    """Write preserve string to cc_compact_pending.txt; hook fires it on next turn."""
+    from pathlib import Path
+
+    compact_file = Path.home() / ".TheIgors" / "cc_compact_pending.txt"
+    try:
+        compact_file.parent.mkdir(parents=True, exist_ok=True)
+        compact_file.write_text(preserve_instructions)
+        return f"Compact queued → {compact_file}. Will fire on next turn."
+    except Exception as exc:
+        return f"ERROR writing compact pending file: {exc}"
+
+
 def dispatch(
     name: str, args: dict, pg_url: str = _PG_URL, cc_send_url: str = _CC_SEND_URL
 ) -> str | None:
@@ -145,4 +190,8 @@ def dispatch(
         )
     if name == "channel_send":
         return channel_send(args["content"], args.get("channel", "shared"), cc_send_url)
+    if name == "cc_send":
+        return channel_send(args["content"], "shared", cc_send_url)
+    if name == "request_compaction":
+        return _request_compaction(args.get("preserve_instructions", ""))
     return None
