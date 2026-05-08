@@ -70,24 +70,38 @@ class TestDbTools:
 
     def test_db_query_returns_json(self):
         fake_row = {"id": 1, "name": "test"}
-        with patch("psycopg2.connect") as mock_connect:
-            conn = self._mock_q([fake_row])
-            mock_connect.return_value = conn
+        conn = self._mock_q([fake_row])
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _fake_get_conn(pg_url=None):
+            yield conn
+
+        with patch(
+            "agent_datacenter.devices.librarian.tools.db_tools.get_conn", _fake_get_conn
+        ):
             result = db_tools.db_query("SELECT 1", pg_url="postgresql://fake/db")
         data = json.loads(result)
         assert data["count"] == 1
 
     def test_db_dispatch_returns_rowcount(self):
-        with patch("psycopg2.connect") as mock_connect:
-            conn = MagicMock()
-            conn.__enter__ = MagicMock(return_value=conn)
-            conn.__exit__ = MagicMock(return_value=False)
-            cursor = MagicMock()
-            cursor.__enter__ = MagicMock(return_value=cursor)
-            cursor.__exit__ = MagicMock(return_value=False)
-            cursor.rowcount = 3
-            conn.cursor.return_value = cursor
-            mock_connect.return_value = conn
+        conn = MagicMock()
+        conn.__enter__ = MagicMock(return_value=conn)
+        conn.__exit__ = MagicMock(return_value=False)
+        cursor = MagicMock()
+        cursor.__enter__ = MagicMock(return_value=cursor)
+        cursor.__exit__ = MagicMock(return_value=False)
+        cursor.rowcount = 3
+        conn.cursor.return_value = cursor
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _fake_get_conn(pg_url=None):
+            yield conn
+
+        with patch(
+            "agent_datacenter.devices.librarian.tools.db_tools.get_conn", _fake_get_conn
+        ):
             result = db_tools.db_dispatch(
                 "DELETE FROM t", pg_url="postgresql://fake/db"
             )

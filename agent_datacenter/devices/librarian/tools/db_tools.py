@@ -6,8 +6,9 @@ import json
 import os
 import uuid
 
-import psycopg2
 import psycopg2.extras
+
+from agent_datacenter.devices.librarian.db import get_conn
 
 _PG_URL = os.environ.get(
     "IGOR_HOME_DB_URL",
@@ -61,22 +62,17 @@ SCHEMAS = [
 ]
 
 
-def _connect(pg_url: str = _PG_URL):
-    return psycopg2.connect(pg_url)
-
-
 def _q(sql: str, params=(), pg_url: str = _PG_URL) -> list[dict]:
-    with _connect(pg_url) as conn:
+    with get_conn(pg_url) as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(sql, params)
             return [dict(r) for r in cur.fetchall()]
 
 
 def _exec(sql: str, params=(), pg_url: str = _PG_URL) -> int:
-    with _connect(pg_url) as conn:
+    with get_conn(pg_url) as conn:
         with conn.cursor() as cur:
             cur.execute(sql, params)
-            conn.commit()
             return cur.rowcount
 
 
