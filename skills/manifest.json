@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "_comment": "Master skill manifest. Listed skills are managed by the installer; unlisted skills in the deploy target are left alone. category is informational. machines: ['*'] = all hosts. deploy: false keeps the entry for record-keeping while skipping this run. Igor-specific skills (cognition-debug, debug-pe-chain, map-igor, readigor) stay TheIgors-internal because they read Igor-specific runtime state.",
+  "_comment": "Master skill manifest. Listed skills are managed by the installer; unlisted skills in the deploy target are left alone. category is informational. machines: ['*'] = all hosts. deploy: false keeps the entry for record-keeping while skipping this run. igor-internal skills are tracked here for completeness but never deployed from ADC — they live in ~/.claude/skills/ on Igor machines only.",
   "skills": {
     "audit-audits":      {"category": "machine-agnostic", "machines": ["*"], "deploy": true},
     "audit-day":         {"category": "machine-agnostic", "machines": ["*"], "deploy": true},
@@ -29,6 +29,11 @@
     "sprint-batch":      {"category": "machine-agnostic", "machines": ["*"], "deploy": true},
     "sprint-ticket":     {"category": "machine-agnostic", "machines": ["*"], "deploy": true},
     "test-fix":          {"category": "machine-agnostic", "machines": ["*"], "deploy": true},
-    "ticket":            {"category": "machine-agnostic", "machines": ["*"], "deploy": true}
+    "ticket":            {"category": "machine-agnostic", "machines": ["*"], "deploy": true},
+
+    "cognition-debug":   {"category": "igor-internal", "machines": [], "deploy": false},
+    "debug-pe-chain":    {"category": "igor-internal", "machines": [], "deploy": false},
+    "map-igor":          {"category": "igor-internal", "machines": [], "deploy": false},
+    "readigor":          {"category": "igor-internal", "machines": [], "deploy": false}
   }
 }
