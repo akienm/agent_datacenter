@@ -204,6 +204,16 @@ else:
 When unread exists, always surface the summary to Akien, then invoke
 /readinbox to see full details and mark-read.
 
+## Step 5.8 — Librarian snapshot (optional, graceful degradation)
+
+When `mcp__librarian__*` tools are available (check deferred tool list),
+call for a brief context snapshot:
+```
+mcp__librarian__summarize(topic="session_start", depth="brief")
+```
+Surface as one line in the briefing: `Librarian: <summary>`.
+When the tool is unavailable or errors, skip silently — never block context-load on librarian.
+
 ## Step 6 — Assemble briefing
 
 Always stay inside the 2000-token (~8000-char) budget. Output shape:
@@ -215,6 +225,7 @@ Igor palace: <node count + top-level branches>
 ADC palace: <N nodes — project summary line + last day rollup>
 Decisions: <last 10 from palace.decisions.*>
 Channel: <recent or "quiet">
+Librarian: <snapshot or "offline">
 [~NNN tokens]
 Ready.
 ```

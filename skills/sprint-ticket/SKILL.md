@@ -84,6 +84,14 @@ If the plan proposes a deprecated form (raw psql, channel.py direct write,
 print()), amend before coding. Also run `/audit-precode` on the plan text
 before Step 6.
 
+**Optional: Librarian research (graceful degradation)**
+When `mcp__librarian__*` tools are available (check deferred tool list),
+call before coding to surface related prior work:
+```
+mcp__librarian__research(topic="<ticket title or key term>", depth="brief")
+```
+Surface as one line: `Librarian: <findings>`. When unavailable or errors, skip silently — never block the sprint on librarian.
+
 ### 6. Pull + work
 
 First, pull to get a clean base:
