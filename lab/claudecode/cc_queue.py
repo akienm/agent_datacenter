@@ -924,6 +924,11 @@ def cmd_reset(args):
         print(f"Task {args[0]} not found.")
         sys.exit(1)
     prev = t["status"]
+    if prev in _TERMINAL_STATUSES:
+        print(
+            f"Skipping reset of {args[0]}: already terminal ({prev}) — will not reopen."
+        )
+        return
     t["status"] = "sprint"
     t["claimed_at"] = None
     t["blocked_at"] = None
