@@ -19,7 +19,39 @@ Wire into Claude Code settings:
 from __future__ import annotations
 
 import json
+import os
 import sys
+import threading
+import urllib.request
+
+# ── UC registration ───────────────────────────────────────────────────────────
+
+_UC_PORT = int(os.environ.get("IGOR_UC_PORT", "8082"))
+_UC_BASE = os.environ.get("IGOR_UC_BASE", f"http://localhost:{_UC_PORT}")
+
+
+def _register_with_uc() -> None:
+    """POST /api/agents/register — fire-and-forget, never blocks MCP init."""
+    try:
+        body = json.dumps(
+            {
+                "agent_id": "librarian",
+                "capabilities": ["research", "memory", "palace", "tools"],
+            }
+        ).encode()
+        req = urllib.request.Request(
+            f"{_UC_BASE}/api/agents/register",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=3.0) as resp:
+            resp.read()
+    except Exception:
+        pass  # UC may not be running; degrade silently
+
+
+# ── JSON-RPC dispatch ─────────────────────────────────────────────────────────
 
 
 def _send(msg: dict) -> None:
@@ -31,6 +63,7 @@ def _dispatch(msg: dict) -> dict | None:
     msg_id = msg.get("id")
 
     if method == "initialize":
+        threading.Thread(target=_register_with_uc, daemon=True).start()
         return {
             "jsonrpc": "2.0",
             "id": msg_id,
