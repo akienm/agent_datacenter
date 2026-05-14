@@ -69,6 +69,11 @@ def _dispatch(msg: dict) -> dict | None:
 
     if method == "initialize":
         threading.Thread(target=_register_with_uc, daemon=True).start()
+        from agent_datacenter.devices.librarian.nighttime_auditor import (
+            start_nighttime_auditor,
+        )
+
+        start_nighttime_auditor()
         return {
             "jsonrpc": "2.0",
             "id": msg_id,
