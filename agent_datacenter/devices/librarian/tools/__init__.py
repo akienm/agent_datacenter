@@ -13,6 +13,7 @@ from . import (
     manifest_tools,
     memory_tools,
     palace_tools,
+    proposal_tools,
     research_tools,
     ticket_tools,
 )
@@ -30,6 +31,7 @@ SCHEMAS: list[dict] = (
     + ticket_tools.SCHEMAS
     + exec_tools.SCHEMAS
     + file_tools.SCHEMAS
+    + proposal_tools.SCHEMAS
 )
 
 
@@ -48,6 +50,7 @@ def dispatch(name: str, args: dict) -> str:
         ticket_tools,
         exec_tools,
         file_tools,
+        proposal_tools,
     ):
         result = module.dispatch(name, args)
         if result is not None:
