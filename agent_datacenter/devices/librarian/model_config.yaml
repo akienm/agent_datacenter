@@ -15,7 +15,7 @@ tiers:
   1:
     name: heavy
     models:
-      - name: qwen/qwen-2.5-32b-instruct
+      - name: qwen/qwen3-32b
         backend: openrouter
       - name: qwen2.5:7b
         backend: ollama

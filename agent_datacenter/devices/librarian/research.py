@@ -89,7 +89,7 @@ def _call_via_inference_device(selection: ModelSelection, prompt: str) -> str:
     req = InferenceRequest(
         messages=[{"role": "user", "content": prompt}],
         model=selection.model,
-        max_tokens=2048,
+        max_tokens=4096,
     )
     return device.dispatch(req).text
 
