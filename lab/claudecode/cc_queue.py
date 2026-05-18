@@ -557,6 +557,75 @@ def _ungate_dependents(tasks: list, closed_id: str) -> int:
     return ungated
 
 
+_HIGH_INERTIA_PATTERNS = (
+    "brainstem/",
+    "memory/models.py",
+    "cognition/reasoners/base.py",
+)
+
+
+def _try_auto_validate(tasks: list, t: dict) -> bool:
+    """Auto-close a ticket if it meets all low-risk criteria.
+
+    Criteria (ALL must pass):
+    1. Size is S or M
+    2. Description does not reference HIGH-inertia files
+    3. Result message suggests tests passed (contains "pass", no "fail")
+    4. Result does not indicate a SCOPE_GUARD trip
+    5. Worker is igor (CC-side work is already validated at commit time)
+
+    Returns True and transitions to closed when all criteria pass.
+    Leaves ticket in awaiting_validation and returns False otherwise.
+    """
+    size = t.get("size", "")
+    if size not in ("S", "M"):
+        _log({"action": "auto_validate_skip", "id": t["id"], "reason": f"size={size}"})
+        return False
+
+    desc = (t.get("description") or "").lower()
+    for pattern in _HIGH_INERTIA_PATTERNS:
+        if pattern.lower() in desc:
+            _log(
+                {
+                    "action": "auto_validate_skip",
+                    "id": t["id"],
+                    "reason": f"high_inertia:{pattern}",
+                }
+            )
+            return False
+
+    result = (t.get("result") or "").lower()
+    if "fail" in result or "scope_guard" in result or "skipped" in result:
+        _log(
+            {
+                "action": "auto_validate_skip",
+                "id": t["id"],
+                "reason": f"result_flags:{result[:60]}",
+            }
+        )
+        return False
+
+    if t.get("worker") != "igor":
+        _log(
+            {"action": "auto_validate_skip", "id": t["id"], "reason": "worker_not_igor"}
+        )
+        return False
+
+    # All criteria pass — close immediately
+    t["status"] = "closed"
+    t["title"] = _with_status_prefix("closed", t["title"])
+    t["auto_validated"] = True
+    decision_id = t.get("decision_id")
+    _decision_rollup(tasks, decision_id)
+    _ungate_dependents(tasks, t["id"])
+    _save(tasks)
+    _log({"action": "auto_validated", "id": t["id"], "title": t["title"]})
+    _prepend_closed_ticket(t["id"], t["title"])
+    _append_to_todays_slate(t)
+    print(f"Auto-validated {t['id']}: {t['title']}")
+    return True
+
+
 def cmd_done(args):
     """Igor's submit path — marks awaiting_validation. CC validates via cmd_close."""
     if len(args) < 2:
@@ -581,8 +650,9 @@ def cmd_done(args):
         }
     )
     _close_igor_goal(args[0])
-    _append_to_todays_slate(t)
-    print(f"Awaiting validation {args[0]}: {t['title']}")
+    if not _try_auto_validate(tasks, t):
+        _append_to_todays_slate(t)
+        print(f"Awaiting validation {args[0]}: {t['title']}")
 
 
 def cmd_close(args):
