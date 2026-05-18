@@ -189,6 +189,61 @@ class TestDispatchBudgetGate:
         mock_check.assert_not_called()
 
 
+# ── alert tests ──────────────────────────────────────────────────────────────
+
+
+class TestMaybeAlert:
+    def _clear_stamp(self):
+        import devices.inference.budget_gate as bg
+
+        bg._ALERT_STAMP.unlink(missing_ok=True)
+
+    def test_no_alert_above_threshold(self, monkeypatch):
+        self._clear_stamp()
+        monkeypatch.setenv("OR_BUDGET_ALERT_USD", "15.0")
+        monkeypatch.delenv("IGOR_HOME_DB_URL", raising=False)
+        from devices.inference.budget_gate import _maybe_alert
+
+        _maybe_alert(20.0)  # above threshold — no alert, no exception
+
+    def test_alert_fires_below_threshold(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("OR_BUDGET_ALERT_USD", "15.0")
+        monkeypatch.delenv("IGOR_HOME_DB_URL", raising=False)
+        import devices.inference.budget_gate as bg
+
+        bg._ALERT_STAMP = tmp_path / "stamp"
+        from devices.inference.budget_gate import _maybe_alert
+
+        _maybe_alert(10.0)  # below threshold
+        assert bg._ALERT_STAMP.exists()
+
+    def test_alert_deduped_within_window(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("OR_BUDGET_ALERT_USD", "15.0")
+        monkeypatch.delenv("IGOR_HOME_DB_URL", raising=False)
+        import devices.inference.budget_gate as bg
+
+        stamp = tmp_path / "stamp"
+        stamp.touch()  # pretend we already alerted just now
+        bg._ALERT_STAMP = stamp
+        # Patch stat to return recent mtime
+        original_stat = stamp.stat
+
+        import time
+
+        with patch("devices.inference.budget_gate._ALERT_DEDUP_SECS", 9999):
+            # stamp exists and is "recent" — alert should be suppressed
+            called = []
+            original_log_warning = bg.log.warning
+            bg.log.warning = lambda *a, **kw: called.append(a)
+            try:
+                from devices.inference.budget_gate import _maybe_alert
+
+                _maybe_alert(5.0)
+            finally:
+                bg.log.warning = original_log_warning
+        assert not called, "alert should be deduped"
+
+
 # ── budget_tools MCP wiring ───────────────────────────────────────────────────
 
 

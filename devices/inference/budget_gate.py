@@ -21,11 +21,14 @@ import os
 import time
 import urllib.request
 from datetime import datetime, timezone
+from pathlib import Path
 
 log = logging.getLogger(__name__)
 
 _OR_CREDITS_URL = "https://openrouter.ai/api/v1/credits"
 _BALANCE_CACHE_TTL = 3600.0  # 1 hour
+_ALERT_DEDUP_SECS = 6 * 3600  # one alert per 6h max
+_ALERT_STAMP = Path(os.environ.get("TMPDIR", "/tmp")) / "adc_budget_alert.stamp"
 
 # In-process cache: {balance, purchased, used, fetched_at}
 _cache: dict = {}
@@ -66,8 +69,45 @@ def _fetch_balance_raw() -> dict | None:
         return None
 
 
+def _maybe_alert(balance: float) -> None:
+    """Post a low-balance alert to the channel at most once per 6h."""
+    threshold = float(os.environ.get("OR_BUDGET_ALERT_USD", "15.0"))
+    if balance > threshold:
+        return
+    # Dedup: skip if we already alerted within the window
+    try:
+        if _ALERT_STAMP.exists():
+            age = time.time() - _ALERT_STAMP.stat().st_mtime
+            if age < _ALERT_DEDUP_SECS:
+                return
+        _ALERT_STAMP.touch()
+    except Exception:
+        pass
+    msg = (
+        f"⚠️  OR budget alert: ${balance:.2f} remaining "
+        f"(threshold ${threshold:.0f}). Top up credits or reduce inference usage."
+    )
+    log.warning("budget_gate: %s", msg)
+    # Best-effort channel post via shared DB — non-fatal if unavailable
+    try:
+        db_url = _home_db_url()
+        if db_url:
+            import psycopg2
+
+            ts = datetime.now(tz=timezone.utc).isoformat()
+            with psycopg2.connect(db_url) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "INSERT INTO infra.channel_messages (author, message, ts)"
+                        " VALUES (%s, %s, %s)",
+                        ("adc_budget_gate", msg, ts),
+                    )
+    except Exception as _e:
+        log.debug("budget_gate: channel post failed — %s", _e)
+
+
 def _write_balance_history(result: dict) -> None:
-    """Append balance snapshot to infra.balance_history for burn-rate tracking."""
+    """Append balance snapshot to infra.balance_history and fire alert if balance is low."""
     db_url = _home_db_url()
     if not db_url:
         return
@@ -84,6 +124,8 @@ def _write_balance_history(result: dict) -> None:
                 )
     except Exception as exc:
         log.debug("budget_gate: balance_history write failed — %s", exc)
+
+    _maybe_alert(result["balance"])
 
 
 def fetch_balance() -> dict | None:
