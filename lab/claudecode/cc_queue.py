@@ -26,7 +26,8 @@ Usage:
     cc_queue.py list --by-decision            — group output by decision_id
     cc_queue.py add <json-file>               — add task from JSON file (defaults to triage)
     cc_queue.py claim <id>                    — mark task in_progress
-    cc_queue.py done <id> <msg>               — mark task closed with result
+    cc_queue.py done <id> <msg>               — mark task awaiting_validation (Igor's submit path)
+    cc_queue.py close <id> <msg>              — mark task closed (CC's validated-close path)
     cc_queue.py block <id> <msg>              — mark task hold with reason
     cc_queue.py setstatus <id> <status>       — set any status directly
     cc_queue.py show <id>                     — show full task detail
@@ -74,16 +75,17 @@ STATUS_ORDER = {
     "akien": 3,
     "sprint": 4,
     "in_progress": 5,
-    "hold": 6,
-    "dependency": 7,
-    "pending": 8,
-    "cancelled": 9,
-    "closed": 10,
+    "awaiting_validation": 6,
+    "hold": 7,
+    "dependency": 8,
+    "pending": 9,
+    "cancelled": 10,
+    "closed": 11,
     # Legacy aliases (kept for old DB rows):
     "needs_review": 0,
     "awaiting_approval": 2,
-    "blocked": 6,
-    "done": 10,
+    "blocked": 7,
+    "done": 11,
 }
 
 _TERMINAL_STATUSES = {"closed", "done", "cancelled"}
@@ -236,6 +238,7 @@ def _format_task_line(t: dict) -> str:
         "akien": "👤",
         "sprint": "⬜",
         "in_progress": "🔵",
+        "awaiting_validation": "🔶",
         "hold": "⏸",
         "dependency": "🔗",
         "pending": "⏳",
@@ -259,7 +262,7 @@ def _print_task(t: dict) -> None:
     print(_format_task_line(t))
     if t["status"] in ("blocked", "hold") and t.get("result"):
         print(f"       HOLD: {t['result']}")
-    if t["status"] in ("done", "closed") and t.get("result"):
+    if t["status"] in ("done", "awaiting_validation", "closed") and t.get("result"):
         print(f"       done: {t['result']}")
 
 
@@ -555,8 +558,37 @@ def _ungate_dependents(tasks: list, closed_id: str) -> int:
 
 
 def cmd_done(args):
+    """Igor's submit path — marks awaiting_validation. CC validates via cmd_close."""
     if len(args) < 2:
         print("Usage: done <id> <result-message>")
+        sys.exit(1)
+    tasks = _load()
+    t = _find(tasks, args[0])
+    if not t:
+        print(f"Task {args[0]} not found.")
+        sys.exit(1)
+    t["status"] = "awaiting_validation"
+    t["title"] = _with_status_prefix("awaiting_validation", t["title"])
+    t["result"] = args[1]
+    t["completed_at"] = _now()
+    _save(tasks)
+    _log(
+        {
+            "action": "awaiting_validation",
+            "id": args[0],
+            "title": t["title"],
+            "result": args[1],
+        }
+    )
+    _close_igor_goal(args[0])
+    _append_to_todays_slate(t)
+    print(f"Awaiting validation {args[0]}: {t['title']}")
+
+
+def cmd_close(args):
+    """CC's validated-close path — marks closed, runs rollup and ungate."""
+    if len(args) < 2:
+        print("Usage: close <id> <result-message>")
         sys.exit(1)
     tasks = _load()
     t = _find(tasks, args[0])
@@ -571,11 +603,11 @@ def cmd_done(args):
     _decision_rollup(tasks, decision_id)
     _ungate_dependents(tasks, t["id"])
     _save(tasks)
-    _log({"action": "done", "id": args[0], "title": t["title"], "result": args[1]})
+    _log({"action": "close", "id": args[0], "title": t["title"], "result": args[1]})
     _prepend_closed_ticket(args[0], t["title"])
     _close_igor_goal(args[0])
     _append_to_todays_slate(t)
-    print(f"Completed {args[0]}: {t['title']}")
+    print(f"Closed {args[0]}: {t['title']}")
 
 
 def cmd_block(args):
@@ -1049,6 +1081,7 @@ COMMANDS = {
     "show": cmd_show,
     "claim": cmd_claim,
     "done": cmd_done,
+    "close": cmd_close,
     "block": cmd_block,
     "propose": cmd_propose,
     "approve": cmd_approve,

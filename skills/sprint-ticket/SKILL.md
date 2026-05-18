@@ -181,8 +181,7 @@ Always let pre-commit hooks run. Push non-force to main.
 
 Always close with a one-line summary of what actually shipped:
 ```bash
-python3 ${CC_WORKFLOW_TOOLS}/cc_queue.py done <id> "what was built"
-python3 ${CC_WORKFLOW_TOOLS}/cc_queue.py retitle <id> "CLOSED: <bare-title>"
+python3 ${CC_WORKFLOW_TOOLS}/cc_queue.py close <id> "what was built"
 echo "- done: <id> — <summary>" >> ~/.TheIgors/claudecode/$(date +%Y%m%d).slate.txt
 ```
 
