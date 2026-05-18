@@ -1021,6 +1021,361 @@ async def _api_comms_health(request: Request):
     return JSONResponse(_comms.health())
 
 
+# ── Palace browser ───────────────────────────────────────────────────────────
+# Read-only palace / rack views. Require IGOR_HOME_DB_URL. Graceful when absent.
+
+_NAV = (
+    '<nav style="margin-bottom:1.5rem;font-size:0.85rem">'
+    '<a href="/">Chat</a> · '
+    '<a href="/rack">Rack</a> · '
+    '<a href="/palace">Palace</a> · '
+    '<a href="/decisions">Decisions</a> · '
+    '<a href="/goals">Goals</a> · '
+    '<a href="/questions">Questions</a> · '
+    '<a href="/hypotheses">Hypotheses</a> · '
+    '<a href="/outcomes">Outcomes</a> · '
+    '<a href="/dashboard">Dashboard</a>'
+    "</nav>"
+)
+
+_PAGE_CSS = (
+    "<style>"
+    "body{font-family:monospace;background:#1a1a2e;color:#e0e0e0;padding:2rem;max-width:1100px;margin:0 auto}"
+    "h1{color:#7ec8e3;font-size:1.2rem;margin-bottom:0.5rem}"
+    "h2{color:#90ee90;font-size:1rem;margin:1rem 0 0.4rem}"
+    "a{color:#7ec8e3;text-decoration:none}"
+    "a:hover{text-decoration:underline}"
+    "table{border-collapse:collapse;width:100%;margin:0.5rem 0}"
+    "th{background:#2a2a3e;color:#90ee90;text-align:left;padding:0.4rem 0.6rem;font-size:0.85rem}"
+    "td{padding:0.3rem 0.6rem;border-bottom:1px solid #333;font-size:0.85rem;vertical-align:top}"
+    "tr:hover td{background:#252535}"
+    ".ok{color:#90ee90}.warn{color:#f0c040}.err{color:#e05050}"
+    "pre{background:#2a2a3e;border:1px solid #444;padding:1rem;border-radius:4px;"
+    "overflow-x:auto;white-space:pre-wrap;word-break:break-word;font-size:0.85rem}"
+    ".badge{display:inline-block;padding:0.1rem 0.4rem;border-radius:3px;font-size:0.8rem;"
+    "background:#333;margin-right:0.3rem}"
+    ".no-db{background:#2a2a3e;border:1px solid #555;padding:1rem;border-radius:4px;color:#888}"
+    "nav a{margin-right:0.3rem}"
+    "</style>"
+)
+
+
+def _html_wrap(title: str, body: str) -> str:
+    return (
+        f'<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">'
+        f'<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f"<title>{title} — ADC</title>{_PAGE_CSS}</head>"
+        f"<body>{_NAV}<h1>{title}</h1>{body}</body></html>"
+    )
+
+
+def _db_conn():
+    """Return a psycopg2 connection or None when IGOR_HOME_DB_URL is absent."""
+    db_url = os.environ.get("IGOR_HOME_DB_URL", "")
+    if not db_url:
+        return None
+    try:
+        import psycopg2
+
+        return psycopg2.connect(db_url)
+    except Exception as exc:
+        log.debug("palace browser: DB connect failed — %s", exc)
+        return None
+
+
+def _no_db_msg() -> str:
+    return '<div class="no-db">IGOR_HOME_DB_URL not set — DB unavailable</div>'
+
+
+async def _page_rack(request: Request):
+    """GET /rack — rack health: machines, OR budget, web server."""
+    conn = _db_conn()
+    rows_html = ""
+    budget_html = ""
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT display_name, hostname, ip, os, status, roles, updated_at"
+                    " FROM infra.machines ORDER BY status DESC, display_name"
+                )
+                cols = [d[0] for d in cur.description]
+                machines = [dict(zip(cols, r)) for r in cur.fetchall()]
+            rows = []
+            for m in machines:
+                status_cls = "ok" if m["status"] == "online" else "err"
+                roles = ", ".join(m.get("roles") or []) or "—"
+                rows.append(
+                    f'<tr><td>{m["display_name"]}</td>'
+                    f'<td>{m["hostname"]}</td>'
+                    f'<td>{m["ip"] or "—"}</td>'
+                    f'<td>{m["os"]}</td>'
+                    f'<td class="{status_cls}">{m["status"]}</td>'
+                    f"<td>{roles}</td></tr>"
+                )
+            rows_html = (
+                "<h2>Machines</h2>"
+                "<table><tr><th>Name</th><th>Hostname</th><th>IP</th>"
+                "<th>OS</th><th>Status</th><th>Roles</th></tr>"
+                + "".join(rows)
+                + "</table>"
+            )
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT balance, purchased, used, timestamp"
+                    " FROM infra.balance_history ORDER BY timestamp DESC LIMIT 1"
+                )
+                row = cur.fetchone()
+            if row:
+                balance, purchased, used, ts = row
+                bal_cls = "ok" if balance > 15 else "warn" if balance > 5 else "err"
+                budget_html = (
+                    "<h2>OpenRouter Budget</h2>"
+                    "<table><tr><th>Balance</th><th>Purchased</th><th>Used</th><th>As of</th></tr>"
+                    f'<tr><td class="{bal_cls}">${balance:.2f}</td>'
+                    f"<td>${purchased:.2f}</td><td>${used:.2f}</td>"
+                    f"<td>{str(ts)[:19]}</td></tr></table>"
+                )
+        except Exception as exc:
+            rows_html = f'<p class="err">DB error: {exc}</p>'
+        finally:
+            conn.close()
+    else:
+        rows_html = _no_db_msg()
+
+    now = time.monotonic()
+    uptime = round(now - _boot_ts)
+    ws_html = (
+        "<h2>Web Server</h2>"
+        "<table><tr><th>Uptime</th><th>Boot</th><th>PID</th><th>WS clients</th></tr>"
+        f"<tr><td>{uptime}s</td><td>{_boot_wall}</td><td>{os.getpid()}</td>"
+        f"<td>{sum(len(q) for q in _session_clients.values())}</td></tr></table>"
+    )
+    body = ws_html + budget_html + rows_html
+    return HTMLResponse(_html_wrap("Rack Health", body))
+
+
+async def _page_palace(request: Request):
+    """GET /palace — full adc.palace tree listing."""
+    conn = _db_conn()
+    if not conn:
+        return HTMLResponse(_html_wrap("Palace", _no_db_msg()))
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT path, title, node_type, updated_at FROM adc.palace ORDER BY path"
+            )
+            nodes = cur.fetchall()
+    except Exception as exc:
+        conn.close()
+        return HTMLResponse(_html_wrap("Palace", f'<p class="err">DB error: {exc}</p>'))
+    finally:
+        conn.close()
+
+    # Group by top-level prefix
+    from collections import defaultdict
+
+    groups: dict = defaultdict(list)
+    for path, title, ntype, updated in nodes:
+        prefix = path.split(".")[0] if "." in path else path
+        groups[prefix].append((path, title or "", ntype or "", updated))
+
+    sections = [f"<p style='color:#888'>{len(nodes)} nodes</p>"]
+    for prefix in sorted(groups):
+        rows = []
+        for path, title, ntype, updated in sorted(groups[prefix]):
+            up = str(updated)[:10] if updated else ""
+            safe_path = path.replace('"', "&quot;")
+            rows.append(
+                f'<tr><td><a href="/palace/{safe_path}">{path}</a></td>'
+                f"<td>{title}</td><td>{ntype}</td><td>{up}</td></tr>"
+            )
+        sections.append(
+            f"<h2>{prefix} ({len(groups[prefix])})</h2>"
+            "<table><tr><th>Path</th><th>Title</th><th>Type</th><th>Updated</th></tr>"
+            + "".join(rows)
+            + "</table>"
+        )
+    return HTMLResponse(_html_wrap("Palace", "".join(sections)))
+
+
+async def _page_palace_node(request: Request):
+    """GET /palace/{path} — render a single palace node."""
+    node_path = request.path_params.get("node_path", "")
+    conn = _db_conn()
+    if not conn:
+        return HTMLResponse(_html_wrap(f"Palace: {node_path}", _no_db_msg()))
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT path, title, content, node_type, updated_at, metadata"
+                " FROM adc.palace WHERE path = %s",
+                (node_path,),
+            )
+            row = cur.fetchone()
+    except Exception as exc:
+        conn.close()
+        return HTMLResponse(
+            _html_wrap(node_path, f'<p class="err">DB error: {exc}</p>')
+        )
+    finally:
+        conn.close()
+
+    if not row:
+        return HTMLResponse(
+            _html_wrap(node_path, f'<p class="err">Node not found: {node_path}</p>'),
+            status_code=404,
+        )
+    path, title, content, ntype, updated, metadata = row
+    import html as _html_mod
+
+    safe_content = _html_mod.escape(content or "")
+    meta_html = ""
+    if metadata:
+        meta_html = f"<pre>{_html_mod.escape(str(metadata))}</pre>"
+    body = (
+        f"<p style='color:#888'>{ntype} · updated {str(updated)[:19]}</p>"
+        f"<pre>{safe_content}</pre>"
+        + (f"<h2>Metadata</h2>{meta_html}" if meta_html else "")
+        + f'<p style="margin-top:1rem"><a href="/palace">← Back to palace</a></p>'
+    )
+    return HTMLResponse(_html_wrap(title or path, body))
+
+
+async def _page_decisions(request: Request):
+    """GET /decisions — list palace.decisions.* nodes."""
+    conn = _db_conn()
+    if not conn:
+        return HTMLResponse(_html_wrap("Decisions", _no_db_msg()))
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT path, title, metadata->>'date', metadata->>'status',"
+                " metadata->>'spawned_tickets'"
+                " FROM adc.palace WHERE path LIKE 'palace.decisions.%'"
+                " ORDER BY path DESC"
+            )
+            rows = cur.fetchall()
+    except Exception as exc:
+        conn.close()
+        return HTMLResponse(
+            _html_wrap("Decisions", f'<p class="err">DB error: {exc}</p>')
+        )
+    finally:
+        conn.close()
+
+    if not rows:
+        return HTMLResponse(_html_wrap("Decisions", "<p>No decisions found.</p>"))
+    tr = []
+    for path, title, date, status, tickets in rows:
+        d_id = path.split(".")[-1] if "." in path else path
+        safe = path.replace('"', "&quot;")
+        status_cls = "ok" if status == "closed" else "warn"
+        tr.append(
+            f'<tr><td><a href="/palace/{safe}">{d_id}</a></td>'
+            f"<td>{title or ''}</td>"
+            f"<td>{date or ''}</td>"
+            f'<td class="{status_cls}">{status or "open"}</td>'
+            f"<td style='font-size:0.8rem'>{tickets or ''}</td></tr>"
+        )
+    body = (
+        f"<p style='color:#888'>{len(rows)} decisions</p>"
+        "<table><tr><th>ID</th><th>Title</th><th>Date</th><th>Status</th><th>Tickets</th></tr>"
+        + "".join(tr)
+        + "</table>"
+    )
+    return HTMLResponse(_html_wrap("Decisions", body))
+
+
+async def _page_goals(request: Request):
+    """GET /goals — Akien's goals tree from palace.shared.akien.goals."""
+    conn = _db_conn()
+    if not conn:
+        return HTMLResponse(_html_wrap("Goals", _no_db_msg()))
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT path, title, content, updated_at FROM adc.palace"
+                " WHERE path LIKE 'palace.goals.%' OR path = 'palace.shared.akien.goals'"
+                " ORDER BY path"
+            )
+            rows = cur.fetchall()
+    except Exception as exc:
+        conn.close()
+        return HTMLResponse(_html_wrap("Goals", f'<p class="err">DB error: {exc}</p>'))
+    finally:
+        conn.close()
+
+    import html as _html_mod
+
+    sections = []
+    for path, title, content, updated in rows:
+        safe = _html_mod.escape(content or "")
+        sections.append(
+            f"<h2>{title or path}</h2>"
+            f"<p style='color:#888'>Updated: {str(updated)[:19]}</p>"
+            f"<pre>{safe}</pre>"
+        )
+    body = "".join(sections) if sections else "<p>No goals nodes found.</p>"
+    return HTMLResponse(_html_wrap("Goals", body))
+
+
+def _simple_palace_list(title: str, path_prefix: str) -> str:
+    """Shared helper for questions / hypotheses / outcomes pages."""
+    conn = _db_conn()
+    if not conn:
+        return _html_wrap(title, _no_db_msg())
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT path, title, left(content,200), updated_at FROM adc.palace"
+                " WHERE path LIKE %s ORDER BY path DESC",
+                (f"{path_prefix}%",),
+            )
+            rows = cur.fetchall()
+    except Exception as exc:
+        conn.close()
+        return _html_wrap(title, f'<p class="err">DB error: {exc}</p>')
+    finally:
+        conn.close()
+
+    if not rows:
+        return _html_wrap(title, f"<p>No {title.lower()} nodes found yet.</p>")
+    import html as _html_mod
+
+    tr = []
+    for path, t, snippet, updated in rows:
+        safe = path.replace('"', "&quot;")
+        tr.append(
+            f'<tr><td><a href="/palace/{safe}">{path}</a></td>'
+            f"<td>{t or ''}</td>"
+            f"<td style='color:#888;font-size:0.8rem'>{_html_mod.escape(snippet or '')}</td>"
+            f"<td>{str(updated)[:10] if updated else ''}</td></tr>"
+        )
+    body = (
+        f"<p style='color:#888'>{len(rows)} {title.lower()}</p>"
+        "<table><tr><th>Path</th><th>Title</th><th>Preview</th><th>Updated</th></tr>"
+        + "".join(tr)
+        + "</table>"
+    )
+    return _html_wrap(title, body)
+
+
+async def _page_questions(request: Request):
+    """GET /questions — list palace.questions.* nodes."""
+    return HTMLResponse(_simple_palace_list("Questions", "palace.questions."))
+
+
+async def _page_hypotheses(request: Request):
+    """GET /hypotheses — list palace.hypotheses.* nodes."""
+    return HTMLResponse(_simple_palace_list("Hypotheses", "palace.hypotheses."))
+
+
+async def _page_outcomes(request: Request):
+    """GET /outcomes — list palace.outcomes.* nodes."""
+    return HTMLResponse(_simple_palace_list("Outcomes", "palace.outcomes."))
+
+
 def _make_app() -> Starlette:
     async def on_startup():
         global _loop
@@ -1053,6 +1408,15 @@ def _make_app() -> Starlette:
         # Comms
         Route("/api/comms/channels", _api_comms_channels),
         Route("/api/comms/health", _api_comms_health),
+        # Palace browser (read-only)
+        Route("/rack", _page_rack),
+        Route("/palace", _page_palace),
+        Route("/palace/{node_path:path}", _page_palace_node),
+        Route("/decisions", _page_decisions),
+        Route("/goals", _page_goals),
+        Route("/questions", _page_questions),
+        Route("/hypotheses", _page_hypotheses),
+        Route("/outcomes", _page_outcomes),
     ]
 
     # Serve compiled Svelte assets if the UI has been built
