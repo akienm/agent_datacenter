@@ -207,7 +207,14 @@ def _init_comms():
         notify=False,
         retention="1y",
     )
-    log.info("Comms: initialized with comms://shared channel")
+    _comms.ensure_channel(
+        "comms://akien/",
+        direction=Direction.READ_WRITE,
+        delivery=Delivery.PULL,
+        notify=False,
+        retention="1y",
+    )
+    log.info("Comms: initialized comms://shared + comms://akien/ channels")
 
 
 # ── WebSocket session management ─────────────────────────────────────────────
@@ -939,7 +946,7 @@ async def _ws_endpoint(ws: WebSocket):
                         }
                         _add_to_history(current_session, umsg)
                         _broadcast_to_session(current_session, json.dumps(umsg))
-                        _channel_append(author, content)
+                        _channel_append("comms://akien/web", content)
                         _deliver_to_tmux(content, author, current_session)
         except Exception as e:
             log.debug("ws receive error: %s", e)
