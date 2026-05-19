@@ -627,32 +627,87 @@ def _try_auto_validate(tasks: list, t: dict) -> bool:
 
 
 def cmd_done(args):
-    """Igor's submit path — marks awaiting_validation. CC validates via cmd_close."""
+    """Igor's submit path — marks awaiting_validation. CC validates via cmd_close.
+
+    Usage: done <id> <result-message> [--commit <hash>|--no-commit <reason>]
+
+    --commit <hash>      : git commit hash for the code change (7-40 hex chars)
+    --no-commit <reason> : explicit declaration that no code was changed
+
+    At least one is required. When neither is supplied, a WARNING is emitted and
+    validation is forced to manual (no auto-validate). Future: hard error once
+    Igor's pe_chain passes --commit on every close.
+    """
+    import re as _re
+
     if len(args) < 2:
-        print("Usage: done <id> <result-message>")
+        print(
+            "Usage: done <id> <result-message> [--commit <hash>|--no-commit <reason>]"
+        )
         sys.exit(1)
+
+    ticket_id = args[0]
+    result_msg = args[1]
+    remaining = args[2:]
+
+    commit_hash = None
+    no_commit_reason = None
+
+    i = 0
+    while i < len(remaining):
+        if remaining[i] == "--commit" and i + 1 < len(remaining):
+            commit_hash = remaining[i + 1]
+            i += 2
+        elif remaining[i] == "--no-commit" and i + 1 < len(remaining):
+            no_commit_reason = remaining[i + 1]
+            i += 2
+        else:
+            i += 1
+
+    # Backwards-compat: detect a 7-40 hex commit hash embedded in the result string
+    if not commit_hash and not no_commit_reason:
+        m = _re.search(r"\b([0-9a-f]{7,40})\b", result_msg)
+        if m:
+            commit_hash = m.group(1)
+
+    missing_evidence = not commit_hash and not no_commit_reason
+    if missing_evidence:
+        print(
+            f"WARN: done {ticket_id} — no --commit or --no-commit supplied. "
+            "Skipping auto-validate; CC must validate manually. "
+            "(Future: this will become a hard error once pe_chain passes --commit.)"
+        )
+
     tasks = _load()
-    t = _find(tasks, args[0])
+    t = _find(tasks, ticket_id)
     if not t:
-        print(f"Task {args[0]} not found.")
+        print(f"Task {ticket_id} not found.")
         sys.exit(1)
     t["status"] = "awaiting_validation"
     t["title"] = _with_status_prefix("awaiting_validation", t["title"])
-    t["result"] = args[1]
+    t["result"] = result_msg
     t["completed_at"] = _now()
+    if commit_hash:
+        t["commit_hash"] = commit_hash
+    if no_commit_reason:
+        t["no_commit_reason"] = no_commit_reason
     _save(tasks)
     _log(
         {
             "action": "awaiting_validation",
-            "id": args[0],
+            "id": ticket_id,
             "title": t["title"],
-            "result": args[1],
+            "result": result_msg,
+            "commit_hash": commit_hash,
+            "no_commit_reason": no_commit_reason,
         }
     )
-    _close_igor_goal(args[0])
-    if not _try_auto_validate(tasks, t):
-        _append_to_todays_slate(t)
-        print(f"Awaiting validation {args[0]}: {t['title']}")
+    _close_igor_goal(ticket_id)
+    # When commit evidence is missing, force manual review — skip auto-validate
+    if not missing_evidence and _try_auto_validate(tasks, t):
+        return
+    _append_to_todays_slate(t)
+    print(f"Awaiting validation {ticket_id}: {t['title']}")
 
 
 def cmd_close(args):
