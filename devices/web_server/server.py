@@ -1857,10 +1857,34 @@ _FALLBACK_HTML = r"""<!DOCTYPE html>
                   font-size: 0.78rem; color: #aaa; border-top: 1px solid #1a1a30;
                   min-height: 1.4em; transition: color 0.3s; }
     #status-bar.busy { color: #7ec8e3; }
+    /* Two-tab layout */
+    #main-tab-bar { display: flex; background: #0d0d22; border-bottom: 2px solid #2a2a4a;
+                    flex-shrink: 0; }
+    .main-tab { font-family: monospace; font-size: 0.85rem; padding: 0.35rem 1.2rem;
+                background: transparent; color: #888; border: none; cursor: pointer;
+                border-bottom: 2px solid transparent; margin-bottom: -2px; }
+    .main-tab:hover { color: #ccc; }
+    .main-tab.active { color: #7ec8e3; border-bottom-color: #7ec8e3; font-weight: bold; }
+    .main-panel { display: none; flex: 1; flex-direction: column; overflow: hidden; }
+    .main-panel.active { display: flex; }
+    /* Control station */
+    #ctrl-body { flex: 1; overflow-y: auto; padding: 1.2rem; }
+    .ctrl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+                 gap: 0.8rem; margin-top: 0.8rem; }
+    .ctrl-card { background: #2a2a3e; border: 1px solid #3a3a5a; border-radius: 4px;
+                 padding: 0.8rem 1rem; }
+    .ctrl-card h3 { color: #90ee90; font-size: 0.9rem; margin-bottom: 0.4rem; }
+    .ctrl-card a { color: #7ec8e3; display: block; margin: 0.15rem 0; font-size: 0.85rem; }
+    .ctrl-card p { color: #888; font-size: 0.8rem; margin-top: 0.3rem; }
   </style>
 </head>
 <body>
   <div id="drop-overlay">Drop file to send</div>
+  <div id="main-tab-bar">
+    <button class="main-tab active" data-tab="comms" onclick="switchTab('comms')">Comms</button>
+    <button class="main-tab" data-tab="control" onclick="switchTab('control')">Control Station</button>
+  </div>
+  <div class="main-panel active" id="panel-comms">
   <div id="channel-bar">
     <span class="channel-tab active" data-channel="comms://shared" onclick="switchChannel('comms://shared')">
       Shared <input type="checkbox" title="Notify on new messages" onclick="event.stopPropagation(); toggleNotify('comms://shared', this)">
@@ -1882,6 +1906,54 @@ _FALLBACK_HTML = r"""<!DOCTYPE html>
     <button onclick="document.getElementById('file-input').click()">clip</button>
     <input id="file-input" type="file" style="display:none" onchange="uploadFile(this)">
   </div>
+  </div><!-- /panel-comms -->
+  <div class="main-panel" id="panel-control">
+    <div id="ctrl-body">
+      <h2 style="color:#7ec8e3;font-size:1rem;margin-bottom:.8rem">Control Station</h2>
+      <div class="ctrl-grid">
+        <div class="ctrl-card">
+          <h3>Rack Health</h3>
+          <a href="/rack">Device status &amp; OR budget</a>
+          <p>All registered machines, heartbeats, and burn rate.</p>
+        </div>
+        <div class="ctrl-card">
+          <h3>Goals</h3>
+          <a href="/goals">Goals tree</a>
+          <p>Akien&apos;s goals &amp; values (palace.shared.akien.goals).</p>
+        </div>
+        <div class="ctrl-card">
+          <h3>Decisions</h3>
+          <a href="/decisions">All decisions</a>
+          <p>Design decisions (D-xxx) and their spawned tickets.</p>
+        </div>
+        <div class="ctrl-card">
+          <h3>Questions</h3>
+          <a href="/questions">Open questions</a>
+          <p>Unresolved questions filed during design sessions.</p>
+        </div>
+        <div class="ctrl-card">
+          <h3>Hypotheses</h3>
+          <a href="/hypotheses">Hypotheses</a>
+          <p>Testable claims filed with decisions.</p>
+        </div>
+        <div class="ctrl-card">
+          <h3>Outcomes</h3>
+          <a href="/outcomes">Outcomes</a>
+          <p>Post-ship outcome records — did the hypothesis hold?</p>
+        </div>
+        <div class="ctrl-card">
+          <h3>Palace Browser</h3>
+          <a href="/palace">Browse all palace nodes</a>
+          <p>Full adc.palace tree — goals, sessions, decisions, rules.</p>
+        </div>
+        <div class="ctrl-card">
+          <h3>Tools</h3>
+          <a href="/dashboard">System dashboard</a>
+          <a href="/metrics">Metrics</a>
+        </div>
+      </div>
+    </div>
+  </div><!-- /panel-control -->
   <script>
     const chat       = document.getElementById('chat');
     const input      = document.getElementById('input');
@@ -1894,6 +1966,14 @@ _FALLBACK_HTML = r"""<!DOCTYPE html>
     let currentChannel = 'comms://shared';
     const channelMsgs = {'comms://shared': []};
     const channelNotify = {};  // channel -> bool (notification checkbox state)
+
+    // ── Main tab switch ──
+    function switchTab(name) {
+      document.querySelectorAll('.main-panel').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.main-tab').forEach(t => t.classList.remove('active'));
+      document.getElementById('panel-' + name).classList.add('active');
+      document.querySelector('.main-tab[data-tab="' + name + '"]').classList.add('active');
+    }
 
     // ── Name persistence ──
     function _saveName(n) {
